@@ -7,21 +7,34 @@ export interface Selection {
 
 const YEAR_MS = 365 * 24 * 60 * 60 * 1000;
 
+interface DatedLike {
+  like: LikeRecord;
+  time: number;
+}
+
+function parseCreatedAt(like: LikeRecord): number {
+  const createdAt: unknown = like.value?.createdAt;
+  return typeof createdAt === "string" ? Date.parse(createdAt) : Number.NaN;
+}
+
+function withTime(like: LikeRecord): DatedLike {
+  return { like, time: parseCreatedAt(like) };
+}
+
+function isDated(entry: DatedLike): boolean {
+  return !Number.isNaN(entry.time);
+}
+
+function byOldestFirst(a: DatedLike, b: DatedLike): number {
+  return a.time - b.time;
+}
+
 export function selectOldLikes(likes: LikeRecord[], runStart: number): Selection {
   const cutoff = runStart - YEAR_MS;
-  const entries: { like: LikeRecord; time: number }[] = [];
-  let skipped = 0;
-  for (const like of likes) {
-    const createdAt: unknown = like.value?.createdAt;
-    const time = typeof createdAt === "string" ? Date.parse(createdAt) : Number.NaN;
-    if (Number.isNaN(time)) {
-      skipped++;
-      continue;
-    }
-    if (time < cutoff) {
-      entries.push({ like, time });
-    }
-  }
-  entries.sort((a, b) => a.time - b.time);
-  return { old: entries.map((entry) => entry.like), skipped };
+  const dated = likes.map(withTime).filter(isDated);
+  const old = dated
+    .filter((entry) => entry.time < cutoff)
+    .sort(byOldestFirst)
+    .map((entry) => entry.like);
+  return { old, skipped: likes.length - dated.length };
 }

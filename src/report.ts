@@ -1,14 +1,14 @@
 import type { LikeRecord } from "./bluesky";
 
-function skippedLine(skipped: number): string {
-  const likes = skipped === 1 ? "1 like" : `${skipped} likes`;
-  return `Skipped ${likes} without a valid creation time`;
-}
-
 export interface DeletionSummary {
   found: number;
   deleted: number;
   skipped: number;
+}
+
+function skippedLine(skipped: number): string {
+  const likes = skipped === 1 ? "1 like" : `${skipped} likes`;
+  return `Skipped ${likes} without a valid creation time`;
 }
 
 export function formatLikeLine(like: LikeRecord): string {

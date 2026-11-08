@@ -1,6 +1,6 @@
 // Feature: feature/delete-old-likes.feature
 // Cycle 5: wire the daily run.
-import { createExecutionContext, createScheduledController, env, waitOnExecutionContext } from "cloudflare:test";
+import { createScheduledController, env } from "cloudflare:test";
 import { afterEach, expect, test, vi } from "vitest";
 import worker from "../src/index";
 import { createFakeBluesky } from "./fake-bluesky";
@@ -23,12 +23,10 @@ function newBluesky() {
 
 async function runScheduled(workerEnv: typeof env): Promise<unknown> {
   const controller = createScheduledController({ scheduledTime: RUN_START, cron: "0 3 * * *" });
-  const ctx = createExecutionContext();
-  const outcome = await worker.scheduled(controller, workerEnv, ctx).then(
+  const outcome = await worker.scheduled(controller, workerEnv).then(
     () => undefined,
     (error: unknown) => error ?? new Error("rejected without a reason"),
   );
-  await waitOnExecutionContext(ctx);
   return outcome;
 }
 
@@ -44,10 +42,8 @@ test("fails loudly and logs no total when listing a page fails", async () => {
   bluesky.intercept();
   const log = vi.spyOn(console, "log").mockImplementation(() => {});
   const controller = createScheduledController({ scheduledTime: RUN_START, cron: "0 3 * * *" });
-  const ctx = createExecutionContext();
 
-  await expect(worker.scheduled(controller, env, ctx)).rejects.toThrow();
-  await waitOnExecutionContext(ctx);
+  await expect(worker.scheduled(controller, env)).rejects.toThrow();
 
   const printed = log.mock.calls.map((args) => args.join(" "));
   expect(printed.filter((line) => /older than one year|No likes are/.test(line))).toStrictEqual([]);

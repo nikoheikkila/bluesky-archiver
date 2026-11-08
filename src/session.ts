@@ -8,12 +8,15 @@ export interface AuthorisedSession {
   fetchHandler(path: string, init?: RequestInit): Promise<Response>;
 }
 
-export async function login(options: LoginOptions): Promise<AuthorisedSession> {
-  const response = await fetch(new URL("/xrpc/com.atproto.server.createSession", options.baseUrl), {
+function requestSession(options: LoginOptions): Promise<Response> {
+  return fetch(new URL("/xrpc/com.atproto.server.createSession", options.baseUrl), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ identifier: options.did, password: options.password }),
   });
+}
+
+async function readAccessToken(response: Response): Promise<string> {
   if (!response.ok) {
     throw new Error(`createSession failed with HTTP ${response.status}`);
   }
@@ -22,11 +25,19 @@ export async function login(options: LoginOptions): Promise<AuthorisedSession> {
   if (typeof accessJwt !== "string" || accessJwt === "") {
     throw new Error("createSession returned no access token");
   }
-  return {
-    fetchHandler: async (path, init = {}) => {
-      const headers = new Headers(init.headers);
-      headers.set("Authorization", `Bearer ${accessJwt}`);
-      return fetch(new URL(path, options.baseUrl), { ...init, headers });
-    },
+  return accessJwt;
+}
+
+function authorisedFetch(baseUrl: string, accessJwt: string): AuthorisedSession["fetchHandler"] {
+  return async (path, init = {}) => {
+    const headers = new Headers(init.headers);
+    headers.set("Authorization", `Bearer ${accessJwt}`);
+    return fetch(new URL(path, baseUrl), { ...init, headers });
   };
+}
+
+export async function login(options: LoginOptions): Promise<AuthorisedSession> {
+  const response = await requestSession(options);
+  const accessJwt = await readAccessToken(response);
+  return { fetchHandler: authorisedFetch(options.baseUrl, accessJwt) };
 }

@@ -1,6 +1,6 @@
 // Feature: feature/delete-old-likes.feature
 // Scenario: Daily run deletes only likes older than one year
-import { createExecutionContext, createScheduledController, env, waitOnExecutionContext } from "cloudflare:test";
+import { createScheduledController, env } from "cloudflare:test";
 import { afterEach, expect, test, vi } from "vitest";
 import worker from "../src/index";
 import { createFakeBluesky } from "./fake-bluesky";
@@ -45,9 +45,7 @@ test("Daily run deletes only likes older than one year", async () => {
   const workerEnv = { ...env, BLUESKY_APP_PASSWORD: APP_PASSWORD };
 
   const controller = createScheduledController({ scheduledTime: runStart });
-  const ctx = createExecutionContext();
-  await worker.scheduled(controller, workerEnv, ctx);
-  await waitOnExecutionContext(ctx);
+  await worker.scheduled(controller, workerEnv);
 
   expect(log.mock.calls.map((args) => args.join(" "))).toStrictEqual([
     `${electionsCreatedAt} ${elections.uri}`,
