@@ -6,15 +6,20 @@ import { formatDeletionSummary, formatLikeLine } from "../src/report";
 
 function like(id: string, createdAt: string): LikeRecord {
   const uri = `at://did:plc:fakeaccount000000000000/app.bsky.feed.like/${id}`;
-  const subject = { uri: `at://did:plc:someoneelse0000000000000/app.bsky.feed.post/${id}`, cid: `cid-${id}` };
+  const subject = {
+    uri: `at://did:plc:someoneelse0000000000000/app.bsky.feed.post/${id}`,
+    cid: `cid-${id}`,
+  };
   return { uri, cid: `like-cid-${id}`, value: { $type: "app.bsky.feed.like", subject, createdAt } };
 }
 
 const first = like("1", "2024-01-01T00:00:00.000Z");
 const second = like("2", "2024-02-01T00:00:00.000Z");
 
-const firstLine = "2024-01-01T00:00:00.000Z at://did:plc:someoneelse0000000000000/app.bsky.feed.post/1";
-const secondLine = "2024-02-01T00:00:00.000Z at://did:plc:someoneelse0000000000000/app.bsky.feed.post/2";
+const firstLine =
+  "2024-01-01T00:00:00.000Z at://did:plc:someoneelse0000000000000/app.bsky.feed.post/1";
+const secondLine =
+  "2024-02-01T00:00:00.000Z at://did:plc:someoneelse0000000000000/app.bsky.feed.post/2";
 
 // Cycle 4: format the deletion report.
 test.each([
@@ -43,12 +48,18 @@ const deletionSummaries = [
   {
     name: "one old like and two skipped",
     summary: { found: 1, deleted: 1, skipped: 2 },
-    expected: ["Skipped 2 likes without a valid creation time", "Deleted 1 of 1 like older than one year"],
+    expected: [
+      "Skipped 2 likes without a valid creation time",
+      "Deleted 1 of 1 like older than one year",
+    ],
   },
   {
     name: "one old like and one skipped",
     summary: { found: 1, deleted: 1, skipped: 1 },
-    expected: ["Skipped 1 like without a valid creation time", "Deleted 1 of 1 like older than one year"],
+    expected: [
+      "Skipped 1 like without a valid creation time",
+      "Deleted 1 of 1 like older than one year",
+    ],
   },
 ];
 
@@ -56,9 +67,12 @@ test.each(deletionSummaries)("formats the deletion summary for $name", ({ summar
   expect(formatDeletionSummary(summary)).toStrictEqual(expected);
 });
 
-test.each(deletionSummaries)("ends no deletion summary line with a period for $name", ({ summary, expected }) => {
-  const lines = formatDeletionSummary(summary);
+test.each(deletionSummaries)(
+  "ends no deletion summary line with a period for $name",
+  ({ summary, expected }) => {
+    const lines = formatDeletionSummary(summary);
 
-  expect(lines).toHaveLength(expected.length);
-  expect(lines.filter((line) => line.endsWith("."))).toStrictEqual([]);
-});
+    expect(lines).toHaveLength(expected.length);
+    expect(lines.filter((line) => line.endsWith("."))).toStrictEqual([]);
+  },
+);

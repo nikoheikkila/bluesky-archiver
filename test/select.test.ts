@@ -10,7 +10,10 @@ const YEAR = 365 * DAY;
 
 function likeCreatedAt(id: string, createdAt: string): LikeRecord {
   const uri = `at://did:plc:fakeaccount000000000000/app.bsky.feed.like/${id}`;
-  const subject = { uri: `at://did:plc:someoneelse0000000000000/app.bsky.feed.post/${id}`, cid: `cid-${id}` };
+  const subject = {
+    uri: `at://did:plc:someoneelse0000000000000/app.bsky.feed.post/${id}`,
+    cid: `cid-${id}`,
+  };
   return { uri, cid: `like-cid-${id}`, value: { $type: "app.bsky.feed.like", subject, createdAt } };
 }
 
@@ -27,11 +30,23 @@ test("selects the likes older than one year, oldest first, and skips those witho
   const unparseable = likeCreatedAt("g", "not-a-date");
 
   const result = selectOldLikes(
-    [yesterday, twoYears, withoutCreatedAt as unknown as LikeRecord, justOverAYear, unparseable, fourHundredDays, justUnderAYear],
+    [
+      yesterday,
+      twoYears,
+      withoutCreatedAt as unknown as LikeRecord,
+      justOverAYear,
+      unparseable,
+      fourHundredDays,
+      justUnderAYear,
+    ],
     runStart,
   );
 
-  expect(result.old.map((like) => like.uri)).toStrictEqual([twoYears.uri, fourHundredDays.uri, justOverAYear.uri]);
+  expect(result.old.map((like) => like.uri)).toStrictEqual([
+    twoYears.uri,
+    fourHundredDays.uri,
+    justOverAYear.uri,
+  ]);
   expect(result.skipped).toBe(2);
 });
 

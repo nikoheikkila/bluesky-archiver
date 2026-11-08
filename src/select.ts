@@ -13,6 +13,7 @@ interface DatedLike {
 }
 
 function parseCreatedAt(like: LikeRecord): number {
+  // biome-ignore lint/suspicious/noUnnecessaryConditions: records from the network may lack a value
   const createdAt: unknown = like.value?.createdAt;
   return typeof createdAt === "string" ? Date.parse(createdAt) : Number.NaN;
 }

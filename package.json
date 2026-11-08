@@ -6,13 +6,18 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "dev": "wrangler dev --test-scheduled",
-    "deploy": "wrangler deploy"
+    "deploy": "wrangler deploy",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "prepare": "lefthook install"
   },
   "devDependencies": {
     "@atproto/lex": "^0.3.0",
+    "@biomejs/biome": "2.6.6",
     "@bsky/sdk": "^1.3.0",
     "@cloudflare/vitest-pool-workers": "^0.23.0",
     "@cloudflare/workers-types": "^5.20261108.1",
+    "lefthook": "2.2.2",
     "typescript": "^7.0.2",
     "vitest": "^4.1.0",
     "wrangler": "^4.158.0"

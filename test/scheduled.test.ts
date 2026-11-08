@@ -18,7 +18,11 @@ afterEach(() => {
 const createdAgo = (ms: number) => new Date(RUN_START - ms).toISOString();
 
 function newBluesky() {
-  return createFakeBluesky({ did: env.BLUESKY_DID, baseUrl: env.BLUESKY_SERVER_URL, appPassword: APP_PASSWORD });
+  return createFakeBluesky({
+    did: env.BLUESKY_DID,
+    baseUrl: env.BLUESKY_SERVER_URL,
+    appPassword: APP_PASSWORD,
+  });
 }
 
 async function runScheduled(workerEnv: typeof env): Promise<unknown> {
@@ -37,7 +41,9 @@ test("fails loudly and logs no total when listing a page fails", async () => {
   const bluesky = createFakeBluesky({ did: env.BLUESKY_DID, baseUrl: env.BLUESKY_SERVER_URL });
   const post = bluesky.addPost("a post");
   const createdAt = new Date(RUN_START - 400 * DAY).toISOString();
-  for (let i = 0; i < 150; i++) bluesky.addLike({ subject: post.uri, createdAt });
+  for (let i = 0; i < 150; i++) {
+    bluesky.addLike({ subject: post.uri, createdAt });
+  }
   bluesky.failPage({ cursor: "100", status: 500 });
   bluesky.intercept();
   const log = vi.spyOn(console, "log").mockImplementation(() => {});
@@ -102,7 +108,9 @@ test("keeps the deleted likes logged after a failed batch and deletes the rest o
   const bluesky = newBluesky();
   const post = bluesky.addPost("a post");
   const createdAts = Array.from({ length: 450 }, (_, i) => createdAgo(400 * DAY + i * HOUR));
-  for (const createdAt of createdAts) bluesky.addLike({ subject: post.uri, createdAt });
+  for (const createdAt of createdAts) {
+    bluesky.addLike({ subject: post.uri, createdAt });
+  }
   bluesky.failApplyWrites({ call: 2, status: 500 });
   bluesky.intercept();
   const log = vi.spyOn(console, "log").mockImplementation(() => {});
@@ -121,7 +129,9 @@ test("keeps the deleted likes logged after a failed batch and deletes the rest o
   const secondError = await runScheduled(workerEnv);
 
   expect(secondError).toBeUndefined();
-  expect(log.mock.calls.map((args) => args.join(" ")).at(-1)).toBe("Deleted 250 of 250 likes older than one year");
+  expect(log.mock.calls.map((args) => args.join(" ")).at(-1)).toBe(
+    "Deleted 250 of 250 likes older than one year",
+  );
   expect(bluesky.likes()).toStrictEqual([]);
 });
 

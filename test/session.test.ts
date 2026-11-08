@@ -41,16 +41,21 @@ test.each([
   ["has no accessJwt key", { refreshJwt: "leaky-refresh-token", did: DID }],
   ["has a numeric accessJwt", { accessJwt: 12345, did: DID }],
   ["has an empty accessJwt", { accessJwt: "", did: DID }],
-])("login rejects a 200 createSession response that %s, without leaking the password or the body", async (_name, body) => {
-  vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json(body));
+])(
+  "login rejects a 200 createSession response that %s, without leaking the password or the body",
+  async (_name, body) => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json(body));
 
-  const failure = await login({ baseUrl: BASE_URL, did: DID, password: APP_PASSWORD }).then(
-    () => undefined,
-    (error: unknown) => error as Error,
-  );
+    const failure = await login({ baseUrl: BASE_URL, did: DID, password: APP_PASSWORD }).then(
+      () => undefined,
+      (error: unknown) => error as Error,
+    );
 
-  expect(failure, "login rejects when the response lacks a string accessJwt").toBeInstanceOf(Error);
-  expect(failure?.message).not.toContain(APP_PASSWORD);
-  expect(failure?.message).not.toContain("leaky-refresh-token");
-  expect(failure?.message).not.toContain("12345");
-});
+    expect(failure, "login rejects when the response lacks a string accessJwt").toBeInstanceOf(
+      Error,
+    );
+    expect(failure?.message).not.toContain(APP_PASSWORD);
+    expect(failure?.message).not.toContain("leaky-refresh-token");
+    expect(failure?.message).not.toContain("12345");
+  },
+);

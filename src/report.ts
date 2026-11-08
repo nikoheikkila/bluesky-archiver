@@ -17,7 +17,9 @@ export function formatLikeLine(like: LikeRecord): string {
 
 export function formatDeletionSummary({ found, deleted, skipped }: DeletionSummary): string[] {
   const lines: string[] = [];
-  if (skipped > 0) lines.push(skippedLine(skipped));
+  if (skipped > 0) {
+    lines.push(skippedLine(skipped));
+  }
   if (found === 0) {
     lines.push("No likes are older than one year");
   } else {

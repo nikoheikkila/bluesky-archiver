@@ -26,11 +26,16 @@ test("fake Bluesky serves 3 likes at limit 2 as pages of 2, 1 and 0 like the rea
   const pages = await walkListRecords({ baseUrl: BASE_URL, did: DID, limit: 2 });
 
   expect(pages.map((page) => page.length)).toStrictEqual([2, 1, 0]);
-  expect(pages.flat().map((record) => record.uri).sort()).toStrictEqual(likes.map((like) => like.uri).sort());
+  expect(
+    pages
+      .flat()
+      .map((record) => record.uri)
+      .sort(),
+  ).toStrictEqual(likes.map((like) => like.uri).sort());
   expect(bluesky.requests()).toHaveLength(3);
-  expect(bluesky.requests().map(({ method, url }) => [method, new URL(url).pathname])).toStrictEqual(
-    Array(3).fill(["GET", "/xrpc/com.atproto.repo.listRecords"]),
-  );
+  expect(
+    bluesky.requests().map(({ method, url }) => [method, new URL(url).pathname]),
+  ).toStrictEqual(Array(3).fill(["GET", "/xrpc/com.atproto.repo.listRecords"]));
 });
 
 test("fake Bluesky logs in and deletes likes in batches of at most 200 like the real server", async () => {

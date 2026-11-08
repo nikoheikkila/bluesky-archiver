@@ -20,6 +20,8 @@ bun run test                                   # default suite (Vitest inside wo
 bunx vitest run test/select.test.ts            # one file: bunx vitest run test/<file>.test.ts
 bunx vitest run -t "exactly one year"          # one test by name: bunx vitest run -t "<name>"
 bun run typecheck                              # tsc --noEmit
+bun run lint                                   # Biome format + lint + import order (strict)
+bun run lint:fix                               # applies Biome fixes
 bun run dev                                    # wrangler dev --test-scheduled; trigger with GET /cdn-cgi/handler/scheduled
 bunx wrangler deploy --dry-run --outdir <dir>  # build the bundle without deploying
 ```
@@ -27,7 +29,9 @@ bunx wrangler deploy --dry-run --outdir <dir>  # build the bundle without deploy
 **Warning:** the scheduled handler deletes likes. Do not trigger it under `bun run dev` against the
 real account.
 
-CI (`.github/workflows/deploy.yml`) runs typecheck and tests on every push to `main`, then
+Biome (`biome.json`) formats and lints the code. A Lefthook pre-commit hook (`lefthook.yml`, installed by `bun install` via `prepare`) runs `biome check --write` on staged files.
+
+CI (`.github/workflows/deploy.yml`) runs `bun run check`, typecheck and tests on every push to `main`, then
 `wrangler deploy` using the `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` repository secrets.
 
 ## Architecture

@@ -41,11 +41,19 @@ async function createSession(target: WriteTarget): Promise<SessionResponse> {
   return session;
 }
 
-async function applyWrites(target: WriteTarget, rkeys: string[], accessJwt?: string): Promise<Response> {
+async function applyWrites(
+  target: WriteTarget,
+  rkeys: string[],
+  accessJwt?: string,
+): Promise<Response> {
   return postWrites(target, rkeys.map(deleteWrite), accessJwt);
 }
 
-async function postWrites(target: WriteTarget, writes: object[], accessJwt?: string): Promise<Response> {
+async function postWrites(
+  target: WriteTarget,
+  writes: object[],
+  accessJwt?: string,
+): Promise<Response> {
   return fetch(new URL("/xrpc/com.atproto.repo.applyWrites", target.baseUrl), {
     method: "POST",
     headers: {
@@ -71,15 +79,23 @@ export async function walkWrites(target: WriteTarget): Promise<{ afterDelete: st
   const afterDelete = await remainingLikeUris(target);
   expect(afterDelete, "only the third like remains after deleting 2 of 3").toStrictEqual([third]);
 
-  const tooMany = [rkeyOf(third), ...Array.from({ length: MAX_WRITES }, (_, index) => `absent${index}`)];
+  const tooMany = [
+    rkeyOf(third),
+    ...Array.from({ length: MAX_WRITES }, (_, index) => `absent${index}`),
+  ];
   expect(tooMany.length, "the oversized batch exceeds the 200 writes limit").toBe(MAX_WRITES + 1);
   const oversized = await applyWrites(target, tooMany, session.accessJwt);
   expect(oversized.status, "applyWrites with 201 deletes status").toBe(400);
-  expect(await remainingLikeUris(target), "nothing is deleted by the oversized batch").toStrictEqual([third]);
+  expect(
+    await remainingLikeUris(target),
+    "nothing is deleted by the oversized batch",
+  ).toStrictEqual([third]);
 
   const anonymous = await applyWrites(target, [rkeyOf(third)]);
   expect(anonymous.status, "applyWrites without a token status").toBe(401);
-  expect(await remainingLikeUris(target), "nothing is deleted without a token").toStrictEqual([third]);
+  expect(await remainingLikeUris(target), "nothing is deleted without a token").toStrictEqual([
+    third,
+  ]);
 
   return { afterDelete };
 }
@@ -94,24 +110,45 @@ export async function walkRejectedWrites(target: WriteTarget): Promise<void> {
     createdAt: "2025-01-01T00:00:00.000Z",
   };
   const forbidden: [string, object][] = [
-    ["a create of app.bsky.feed.like", { $type: "com.atproto.repo.applyWrites#create", collection: "app.bsky.feed.like", value: likeValue }],
+    [
+      "a create of app.bsky.feed.like",
+      {
+        $type: "com.atproto.repo.applyWrites#create",
+        collection: "app.bsky.feed.like",
+        value: likeValue,
+      },
+    ],
     [
       "an update of app.bsky.feed.like",
-      { $type: "com.atproto.repo.applyWrites#update", collection: "app.bsky.feed.like", rkey: rkeyOf(second), value: likeValue },
+      {
+        $type: "com.atproto.repo.applyWrites#update",
+        collection: "app.bsky.feed.like",
+        rkey: rkeyOf(second),
+        value: likeValue,
+      },
     ],
     [
       "a delete in app.bsky.feed.post",
-      { $type: "com.atproto.repo.applyWrites#delete", collection: "app.bsky.feed.post", rkey: rkeyOf(second) },
+      {
+        $type: "com.atproto.repo.applyWrites#delete",
+        collection: "app.bsky.feed.post",
+        rkey: rkeyOf(second),
+      },
     ],
   ];
 
   const session = await createSession(target);
 
   for (const [name, write] of forbidden) {
-    const response = await postWrites(target, [deleteWrite(rkeyOf(first)), write], session.accessJwt);
-    expect(response.status, `applyWrites carrying ${name} status`).toBe(400);
-    expect(await remainingLikeUris(target), `nothing is applied when the request carries ${name}`).toStrictEqual(
-      target.likeUris,
+    const response = await postWrites(
+      target,
+      [deleteWrite(rkeyOf(first)), write],
+      session.accessJwt,
     );
+    expect(response.status, `applyWrites carrying ${name} status`).toBe(400);
+    expect(
+      await remainingLikeUris(target),
+      `nothing is applied when the request carries ${name}`,
+    ).toStrictEqual(target.likeUris);
   }
 }

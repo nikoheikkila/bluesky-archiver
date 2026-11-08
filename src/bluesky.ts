@@ -41,7 +41,9 @@ async function fetchLikesPage(
   url.searchParams.set("repo", did);
   url.searchParams.set("collection", LIKE_COLLECTION);
   url.searchParams.set("limit", PAGE_SIZE);
-  if (cursor) url.searchParams.set("cursor", cursor);
+  if (cursor) {
+    url.searchParams.set("cursor", cursor);
+  }
   const response = await fetch(url);
   if (!response.ok) {
     throw new Error(`${LIST_RECORDS} failed with HTTP ${response.status}`);

@@ -29,7 +29,7 @@ async function readAccessToken(response: Response): Promise<string> {
 }
 
 function authorisedFetch(baseUrl: string, accessJwt: string): AuthorisedSession["fetchHandler"] {
-  return async (path, init = {}) => {
+  return (path, init = {}) => {
     const headers = new Headers(init.headers);
     headers.set("Authorization", `Bearer ${accessJwt}`);
     return fetch(new URL(path, baseUrl), { ...init, headers });

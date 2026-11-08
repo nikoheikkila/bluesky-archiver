@@ -1,8 +1,8 @@
 import { listLikes } from "./bluesky";
-import { selectOldLikes } from "./select";
-import { formatLikeLine, formatDeletionSummary } from "./report";
-import { login } from "./session";
 import { deleteLikes } from "./delete";
+import { formatDeletionSummary, formatLikeLine } from "./report";
+import { selectOldLikes } from "./select";
+import { login } from "./session";
 
 export interface Env {
   BLUESKY_DID: string;

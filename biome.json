@@ -1,0 +1,102 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.6.6/schema.json",
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true
+  },
+  "files": {
+    "ignoreUnknown": true,
+    "includes": ["**", "!specs", "!.wrangler", "!.idea", "!worker-configuration.d.ts"]
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 100
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "preset": "recommended",
+      "style": {
+        "useBlockStatements": "error",
+        "noNonNullAssertion": "error",
+        "noParameterAssign": "error",
+        "useConst": "error",
+        "useImportType": "error",
+        "useNodejsImportProtocol": "error",
+        "noNamespace": "error",
+        "noInferrableTypes": "error",
+        "useConsistentArrayType": "error",
+        "useShorthandAssign": "error",
+        "useTemplate": "error"
+      },
+      "suspicious": {
+        "noConsole": {
+          "level": "error",
+          "options": {
+            "allow": ["log"]
+          }
+        },
+        "noExplicitAny": "error",
+        "noEmptyBlockStatements": "error",
+        "noConfusingVoidType": "error",
+        "useAwait": "error",
+        "noShadow": "error",
+        "noUnnecessaryConditions": "error"
+      },
+      "correctness": {
+        "noUnusedImports": "error",
+        "noUnusedVariables": "error",
+        "noUnusedFunctionParameters": "error"
+      },
+      "complexity": {
+        "noExcessiveCognitiveComplexity": "error",
+        "useSimplifiedLogicExpression": "error"
+      },
+      "performance": {
+        "noDelete": "error"
+      }
+    }
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "double",
+      "semicolons": "always"
+    }
+  },
+  "assist": {
+    "enabled": true,
+    "actions": {
+      "source": {
+        "organizeImports": "on",
+        "useSortedKeys": "off"
+      }
+    }
+  },
+  "overrides": [
+    {
+      "includes": ["test/**"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noEmptyBlockStatements": "off",
+            "useAwait": "off",
+            "noShadow": "off",
+            "noUnnecessaryConditions": "off"
+          },
+          "style": {
+            "noNamespace": "off"
+          },
+          "performance": {
+            "noDelete": "off"
+          },
+          "complexity": {
+            "noExcessiveCognitiveComplexity": "off"
+          }
+        }
+      }
+    }
+  ]
+}

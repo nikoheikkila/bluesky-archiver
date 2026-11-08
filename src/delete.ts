@@ -17,7 +17,10 @@ export async function deleteLikes(likes: LikeRecord[], options: DeleteLikesOptio
   }
 }
 
-async function applyDeletes(batch: LikeRecord[], { did, fetchHandler }: DeleteLikesOptions): Promise<void> {
+async function applyDeletes(
+  batch: LikeRecord[],
+  { did, fetchHandler }: DeleteLikesOptions,
+): Promise<void> {
   const writes = batch.map((like) => ({
     $type: "com.atproto.repo.applyWrites#delete",
     collection: "app.bsky.feed.like",
@@ -30,5 +33,7 @@ async function applyDeletes(batch: LikeRecord[], { did, fetchHandler }: DeleteLi
   });
   // The body is never read; cancel it so the Workers runtime releases the connection.
   await response.body?.cancel();
-  if (!response.ok) throw new Error(`applyWrites failed with HTTP ${response.status}`);
+  if (!response.ok) {
+    throw new Error(`applyWrites failed with HTTP ${response.status}`);
+  }
 }

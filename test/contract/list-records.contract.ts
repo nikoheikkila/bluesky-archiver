@@ -31,19 +31,29 @@ export async function walkListRecords(target: ListRecordsTarget): Promise<LikeRe
     url.searchParams.set("repo", target.did);
     url.searchParams.set("collection", "app.bsky.feed.like");
     url.searchParams.set("limit", String(target.limit));
-    if (cursor !== undefined) url.searchParams.set("cursor", cursor);
+    if (cursor !== undefined) {
+      url.searchParams.set("cursor", cursor);
+    }
 
     const response = await fetch(url);
     expect(response.status, `page ${pageNumber} status`).toBe(200);
     const body = (await response.json()) as ListRecordsResponse;
 
-    expect(body.records.length, `page ${pageNumber} holds at most the limit`).toBeLessThanOrEqual(target.limit);
+    expect(body.records.length, `page ${pageNumber} holds at most the limit`).toBeLessThanOrEqual(
+      target.limit,
+    );
 
     for (const record of body.records) {
       expect(typeof record.uri, "record has a uri").toBe("string");
-      expect(typeof record.value?.createdAt, `record ${record.uri} has value.createdAt`).toBe("string");
-      expect(typeof record.value?.subject?.uri, `record ${record.uri} has value.subject.uri`).toBe("string");
-      expect(seen.has(record.uri), `record ${record.uri} appears only once across pages`).toBe(false);
+      expect(typeof record.value?.createdAt, `record ${record.uri} has value.createdAt`).toBe(
+        "string",
+      );
+      expect(typeof record.value?.subject?.uri, `record ${record.uri} has value.subject.uri`).toBe(
+        "string",
+      );
+      expect(seen.has(record.uri), `record ${record.uri} appears only once across pages`).toBe(
+        false,
+      );
       seen.add(record.uri);
     }
 

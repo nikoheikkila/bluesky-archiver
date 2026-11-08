@@ -26,17 +26,21 @@ test.each([
   const records = await listLikes({ baseUrl: BASE_URL, did: DID });
 
   expect(records).toHaveLength(likeCount);
-  expect(records.map((record) => record.uri).sort()).toStrictEqual(likes.map((like) => like.uri).sort());
-  expect(bluesky.requests()).toHaveLength(requestCount);
-  expect(bluesky.requests().map(({ method, url }) => [method, new URL(url).pathname])).toStrictEqual(
-    Array(requestCount).fill(["GET", "/xrpc/com.atproto.repo.listRecords"]),
+  expect(records.map((record) => record.uri).sort()).toStrictEqual(
+    likes.map((like) => like.uri).sort(),
   );
+  expect(bluesky.requests()).toHaveLength(requestCount);
+  expect(
+    bluesky.requests().map(({ method, url }) => [method, new URL(url).pathname]),
+  ).toStrictEqual(Array(requestCount).fill(["GET", "/xrpc/com.atproto.repo.listRecords"]));
 });
 
 test("asks the server only for the configured account's likes", async () => {
   const bluesky = createFakeBluesky({ did: DID, baseUrl: BASE_URL });
   const post = bluesky.addPost("a post");
-  for (let i = 0; i < 3; i++) bluesky.addLike({ subject: post.uri, createdAt: "2025-01-01T00:00:00.000Z" });
+  for (let i = 0; i < 3; i++) {
+    bluesky.addLike({ subject: post.uri, createdAt: "2025-01-01T00:00:00.000Z" });
+  }
   bluesky.intercept();
 
   const records = await listLikes({ baseUrl: BASE_URL, did: DID });
@@ -58,7 +62,9 @@ test("asks the server only for the configured account's likes", async () => {
 test("fails loudly naming the request when the server answers a page with an error", async () => {
   const bluesky = createFakeBluesky({ did: DID, baseUrl: BASE_URL });
   const post = bluesky.addPost("a post");
-  for (let i = 0; i < 250; i++) bluesky.addLike({ subject: post.uri, createdAt: "2025-01-01T00:00:00.000Z" });
+  for (let i = 0; i < 250; i++) {
+    bluesky.addLike({ subject: post.uri, createdAt: "2025-01-01T00:00:00.000Z" });
+  }
   bluesky.failPage({ cursor: "100", status: 500 });
   bluesky.intercept();
 
