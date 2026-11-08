@@ -13,8 +13,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-// Expected to fail until the scheduled run is wired (cycle 6).
-test.fails("Dry run lists only likes older than one year", async () => {
+test("Dry run lists only likes older than one year", async () => {
   const runStart = Date.parse("2026-11-08T03:00:00Z");
   const createdBefore = (ms: number) => new Date(runStart - ms).toISOString();
 
@@ -34,6 +33,8 @@ test.fails("Dry run lists only likes older than one year", async () => {
   bluesky.addLike({ subject: cooking.uri, createdAt: createdBefore(YEAR - HOUR) });
   bluesky.addLike({ subject: music.uri, createdAt: createdBefore(DAY) });
   bluesky.deletePost(deleted);
+  expect(bluesky.posts().map((post) => post.uri)).not.toContain(deleted.uri);
+  expect(bluesky.likes().map((like) => like.subject)).toContain(deleted.uri);
   bluesky.intercept();
   const log = vi.spyOn(console, "log").mockImplementation(() => {});
 

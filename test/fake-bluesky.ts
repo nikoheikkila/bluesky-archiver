@@ -23,6 +23,7 @@ export interface FakeBluesky {
   deletePost(post: FakePost): void;
   addLike(like: { subject: string; createdAt: string }): FakeLike;
   likes(): FakeLike[];
+  posts(): FakePost[];
   failPage(failure: { cursor: string; status: number }): void;
   intercept(): void;
   requests(): { method: string; url: string }[];
@@ -31,6 +32,7 @@ export interface FakeBluesky {
 export function createFakeBluesky(options: FakeBlueskyOptions): FakeBluesky {
   let counter = 0;
   const stored: FakeLike[] = [];
+  const storedPosts: FakePost[] = [];
   const served: { method: string; url: string }[] = [];
   const failures = new Map<string, number>();
   return {
@@ -39,9 +41,14 @@ export function createFakeBluesky(options: FakeBlueskyOptions): FakeBluesky {
     },
     addPost: () => {
       counter++;
-      return { uri: `at://${options.did}/app.bsky.feed.post/${counter}` };
+      const post = { uri: `at://${options.did}/app.bsky.feed.post/${counter}` };
+      storedPosts.push(post);
+      return post;
     },
-    deletePost: () => {},
+    deletePost: (post) => {
+      const index = storedPosts.findIndex((stored) => stored.uri === post.uri);
+      if (index !== -1) storedPosts.splice(index, 1);
+    },
     addLike: (like) => {
       counter++;
       const created = { uri: `at://${options.did}/app.bsky.feed.like/${counter}`, subject: like.subject, createdAt: like.createdAt };
@@ -49,6 +56,7 @@ export function createFakeBluesky(options: FakeBlueskyOptions): FakeBluesky {
       return created;
     },
     likes: () => stored,
+    posts: () => storedPosts,
     intercept: () => {
       vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
         const request = input instanceof Request ? input : null;
