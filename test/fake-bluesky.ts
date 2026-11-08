@@ -23,6 +23,7 @@ export interface FakeBluesky {
   deletePost(post: FakePost): void;
   addLike(like: { subject: string; createdAt: string }): FakeLike;
   likes(): FakeLike[];
+  failPage(failure: { cursor: string; status: number }): void;
   intercept(): void;
   requests(): { method: string; url: string }[];
 }
@@ -31,7 +32,11 @@ export function createFakeBluesky(options: FakeBlueskyOptions): FakeBluesky {
   let counter = 0;
   const stored: FakeLike[] = [];
   const served: { method: string; url: string }[] = [];
+  const failures = new Map<string, number>();
   return {
+    failPage: ({ cursor, status }) => {
+      failures.set(cursor, status);
+    },
     addPost: () => {
       counter++;
       return { uri: `at://${options.did}/app.bsky.feed.post/${counter}` };
@@ -50,6 +55,10 @@ export function createFakeBluesky(options: FakeBlueskyOptions): FakeBluesky {
         const url = new URL(request ? request.url : String(input));
         if (url.origin !== new URL(options.baseUrl).origin) throw new Error(`unexpected origin ${url.origin}`);
         served.push({ method: request ? request.method : init?.method ?? "GET", url: url.toString() });
+        const failure = failures.get(url.searchParams.get("cursor") ?? "");
+        if (failure !== undefined) {
+          return Response.json({ error: "InternalServerError", message: "Injected failure" }, { status: failure });
+        }
         const repo = url.searchParams.get("repo");
         // Error shape assumed from the PDS; unverified against the live server.
         if (repo !== options.did) {
