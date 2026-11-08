@@ -1,0 +1,13 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "bluesky-archiver",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-22",
+  "triggers": {
+    "crons": ["0 3 * * *"]
+  },
+  "vars": {
+    "BLUESKY_DID": "did:plc:krt7mrzm5yv5wdcsr6cwpyiy",
+    "BLUESKY_SERVER_URL": "https://shimeji.us-east.host.bsky.network"
+  }
+}
