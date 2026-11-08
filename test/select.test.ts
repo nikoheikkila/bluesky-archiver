@@ -1,4 +1,4 @@
-// Feature: feature/dry-run-old-likes.feature
+// Feature: feature/delete-old-likes.feature
 // Cycle 4: pick the likes older than one year.
 import { expect, test } from "vitest";
 import type { LikeRecord } from "../src/bluesky";

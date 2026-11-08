@@ -1,17 +1,28 @@
-import type { Selection } from "./select";
+import type { LikeRecord } from "./bluesky";
 
-export function formatReport({ old, skipped }: Selection): string[] {
-  const lines = old.map((like) => `${like.value.createdAt} ${like.value.subject.uri}`);
-  if (skipped > 0) {
-    const likes = skipped === 1 ? "1 like" : `${skipped} likes`;
-    lines.push(`Skipped ${likes} without a valid creation time.`);
-  }
-  lines.push(totalLine(old.length));
-  return lines;
+function skippedLine(skipped: number): string {
+  const likes = skipped === 1 ? "1 like" : `${skipped} likes`;
+  return `Skipped ${likes} without a valid creation time`;
 }
 
-function totalLine(count: number): string {
-  if (count === 0) return "No likes are older than one year.";
-  const likes = count === 1 ? "1 like is" : `${count} likes are`;
-  return `${likes} older than one year and would be deleted.`;
+export interface DeletionSummary {
+  found: number;
+  deleted: number;
+  skipped: number;
+}
+
+export function formatLikeLine(like: LikeRecord): string {
+  return `${like.value.createdAt} ${like.value.subject.uri}`;
+}
+
+export function formatDeletionSummary({ found, deleted, skipped }: DeletionSummary): string[] {
+  const lines: string[] = [];
+  if (skipped > 0) lines.push(skippedLine(skipped));
+  if (found === 0) {
+    lines.push("No likes are older than one year");
+  } else {
+    const noun = found === 1 ? "like" : "likes";
+    lines.push(`Deleted ${deleted} of ${found} ${noun} older than one year`);
+  }
+  return lines;
 }

@@ -31,6 +31,7 @@ export interface FakeBluesky {
   likes(): FakeLike[];
   posts(): FakePost[];
   failPage(failure: { cursor: string; status: number }): void;
+  failApplyWrites(failure: { call: number; status: number }): void;
   intercept(): void;
   requests(): { method: string; url: string }[];
 }
@@ -41,7 +42,12 @@ export function createFakeBluesky(options: FakeBlueskyOptions): FakeBluesky {
   const storedPosts: FakePost[] = [];
   const served: { method: string; url: string }[] = [];
   const failures = new Map<string, number>();
+  const writeFailures = new Map<number, number>();
+  let applyWritesCalls = 0;
   return {
+    failApplyWrites: ({ call, status }) => {
+      writeFailures.set(call, status);
+    },
     failPage: ({ cursor, status }) => {
       failures.set(cursor, status);
     },
@@ -83,6 +89,11 @@ export function createFakeBluesky(options: FakeBlueskyOptions): FakeBluesky {
         if (url.pathname === "/xrpc/com.atproto.repo.applyWrites" && method === "POST") {
           if (request.headers.get("Authorization") !== `Bearer ${ACCESS_JWT}`) {
             return Response.json({ error: "AuthenticationRequired", message: "Authentication Required" }, { status: 401 });
+          }
+          applyWritesCalls++;
+          const writeFailure = writeFailures.get(applyWritesCalls);
+          if (writeFailure !== undefined) {
+            return Response.json({ error: "InternalServerError", message: "Injected failure" }, { status: writeFailure });
           }
           const body = com.atproto.repo.applyWrites.$input.schema.validate(await request.json());
           if (body.writes.length > MAX_WRITES) {

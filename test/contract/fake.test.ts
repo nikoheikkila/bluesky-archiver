@@ -1,4 +1,4 @@
-// Feature: feature/dry-run-old-likes.feature
+// Feature: feature/delete-old-likes.feature
 // Cycle 1: the fake serves likes page by page like the real server.
 import { afterEach, expect, test, vi } from "vitest";
 import { createFakeBluesky } from "../fake-bluesky";

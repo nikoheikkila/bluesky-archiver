@@ -1,8 +1,8 @@
-// Feature: feature/dry-run-old-likes.feature
+// Feature: feature/delete-old-likes.feature
 // Cycle 5: format the report.
 import { expect, test } from "vitest";
 import type { LikeRecord } from "../src/bluesky";
-import { formatReport } from "../src/report";
+import { formatDeletionSummary, formatLikeLine } from "../src/report";
 
 function like(id: string, createdAt: string): LikeRecord {
   const uri = `at://did:plc:fakeaccount000000000000/app.bsky.feed.like/${id}`;
@@ -12,51 +12,53 @@ function like(id: string, createdAt: string): LikeRecord {
 
 const first = like("1", "2024-01-01T00:00:00.000Z");
 const second = like("2", "2024-02-01T00:00:00.000Z");
-const third = like("3", "2024-03-01T00:00:00.000Z");
 
 const firstLine = "2024-01-01T00:00:00.000Z at://did:plc:someoneelse0000000000000/app.bsky.feed.post/1";
 const secondLine = "2024-02-01T00:00:00.000Z at://did:plc:someoneelse0000000000000/app.bsky.feed.post/2";
-const thirdLine = "2024-03-01T00:00:00.000Z at://did:plc:someoneelse0000000000000/app.bsky.feed.post/3";
 
+// Cycle 4: format the deletion report.
 test.each([
+  { name: "first like", subject: first, expected: firstLine },
+  { name: "second like", subject: second, expected: secondLine },
+])("formats the $name as a deletion report line", ({ subject, expected }) => {
+  expect(formatLikeLine(subject)).toStrictEqual(expected);
+});
+
+const deletionSummaries = [
   {
-    name: "three old likes",
-    old: [first, second, third],
-    skipped: 0,
-    expected: [firstLine, secondLine, thirdLine, "3 likes are older than one year and would be deleted."],
+    name: "all three likes deleted",
+    summary: { found: 3, deleted: 3, skipped: 0 },
+    expected: ["Deleted 3 of 3 likes older than one year"],
   },
   {
-    name: "one old like",
-    old: [first],
-    skipped: 0,
-    expected: [firstLine, "1 like is older than one year and would be deleted."],
+    name: "one like deleted",
+    summary: { found: 1, deleted: 1, skipped: 0 },
+    expected: ["Deleted 1 of 1 like older than one year"],
   },
   {
     name: "no old likes",
-    old: [],
-    skipped: 0,
-    expected: ["No likes are older than one year."],
+    summary: { found: 0, deleted: 0, skipped: 0 },
+    expected: ["No likes are older than one year"],
   },
   {
     name: "one old like and two skipped",
-    old: [first],
-    skipped: 2,
-    expected: [
-      firstLine,
-      "Skipped 2 likes without a valid creation time.",
-      "1 like is older than one year and would be deleted.",
-    ],
+    summary: { found: 1, deleted: 1, skipped: 2 },
+    expected: ["Skipped 2 likes without a valid creation time", "Deleted 1 of 1 like older than one year"],
   },
   {
     name: "one old like and one skipped",
-    old: [first],
-    skipped: 1,
-    expected: [
-      firstLine,
-      "Skipped 1 like without a valid creation time.",
-      "1 like is older than one year and would be deleted.",
-    ],
+    summary: { found: 1, deleted: 1, skipped: 1 },
+    expected: ["Skipped 1 like without a valid creation time", "Deleted 1 of 1 like older than one year"],
   },
-])("formats the report for $name", ({ old, skipped, expected }) => {
-  expect(formatReport({ old, skipped })).toStrictEqual(expected);
+];
+
+test.each(deletionSummaries)("formats the deletion summary for $name", ({ summary, expected }) => {
+  expect(formatDeletionSummary(summary)).toStrictEqual(expected);
+});
+
+test.each(deletionSummaries)("ends no deletion summary line with a period for $name", ({ summary, expected }) => {
+  const lines = formatDeletionSummary(summary);
+
+  expect(lines).toHaveLength(expected.length);
+  expect(lines.filter((line) => line.endsWith("."))).toStrictEqual([]);
 });

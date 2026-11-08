@@ -14,8 +14,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-// Expected to fail until the daily run deletes likes (spec delete-old-likes, cycle 5).
-test.fails("Daily run deletes only likes older than one year", async () => {
+test("Daily run deletes only likes older than one year", async () => {
   const runStart = Date.parse("2026-11-08T03:00:00Z");
   const createdBefore = (ms: number) => new Date(runStart - ms).toISOString();
 

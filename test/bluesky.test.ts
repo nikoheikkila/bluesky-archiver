@@ -1,4 +1,4 @@
-// Feature: feature/dry-run-old-likes.feature
+// Feature: feature/delete-old-likes.feature
 // Cycles 2-3: list every like across all pages; fail loudly when a request fails.
 import { afterEach, expect, test, vi } from "vitest";
 import { listLikes } from "../src/bluesky";
