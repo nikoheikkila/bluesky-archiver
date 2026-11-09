@@ -27,7 +27,13 @@ task lint                                   # Biome format + lint + import order
 task lint:fix                               # applies Biome fixes
 task dev                                    # wrangler dev --test-scheduled; trigger with GET /cdn-cgi/handler/scheduled
 bunx wrangler deploy --dry-run --outdir <dir>  # build the bundle without deploying
+task count                                  # live count of likes/reposts older than one year + the run's request budget (public endpoint, read-only)
+task count -- --at <ISO time> [nsid ...]    # judged at a given run start, for chosen collections
 ```
+
+`task count` runs `scripts/count-old.ts` with Bun. It reads the DID and server URL from
+`wrangler.jsonc`, never logs in, and is independent of `src/` on purpose, so it can cross-check the
+Worker's counts. It is not part of the bundle or of `tsc` (outside `tsconfig.json`'s `include`).
 
 Logs (requires 1Password CLI too):
 
@@ -109,8 +115,9 @@ failed likes request stops the run before any repost request.
   suite. No contract runs against the real server any more, and no test may reach it. Change the
   fake only together with its contract.
 - Tests fix the run start explicitly so they pass at any wall-clock time.
-- `test/delete-old-likes.acceptance.test.ts` drives the Worker's `scheduled` entry point for the
-  scenario in `feature/delete-old-likes.feature`.
+- `test/delete-old-likes.acceptance.test.ts` and `test/delete-old-reposts.acceptance.test.ts` drive
+  the Worker's `scheduled` entry point for the scenarios in `feature/delete-old-likes.feature` and
+  `feature/delete-old-reposts.feature`.
 - `test/env.d.ts` augments the global `Cloudflare.Env` with the Worker's `Env` for typing in tests.
 
 ## Constraints
@@ -148,3 +155,7 @@ Work is spec-driven with the agentic-cd plugin (`/specify`, `/start-session`, `/
 or force-add it. Feature files in `feature/` are tracked. Each spec has one Gherkin scenario
 (the acceptance test) and a plan of TDD cycles; commits use Conventional Commits (`feat:`, `fix:`,
 `docs(spec):`).
+
+Pitfalls learned in earlier sessions (tests that pin the whole run, the fake's deliberately invalid
+fixtures, the request budget, recovering lost subagent reports) are in @AGENTS.md. Adding a record
+kind follows `.claude/skills/add-record-kind/SKILL.md`.

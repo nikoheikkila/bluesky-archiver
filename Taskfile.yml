@@ -46,6 +46,11 @@ tasks:
     cmds:
       - bunx wrangler deploy
 
+  count:
+    desc: Count likes and reposts older than one year via the public listRecords endpoint, read-only (e.g. task count -- --at 2026-11-10T03:00:00Z app.bsky.feed.repost)
+    cmds:
+      - bun scripts/count-old.ts {{.CLI_ARGS}}
+
   logs:
     desc: Stream the deployed Worker's logs (pretty), reconnecting when the session ends
     cmds:
