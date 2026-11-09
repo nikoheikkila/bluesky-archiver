@@ -1,7 +1,7 @@
-import { listLikes } from "./bluesky";
+import { LIKE_COLLECTION, type LikeRecord, listRecords } from "./bluesky";
 import { deleteLikes } from "./delete";
 import { formatDeletionSummary, formatLikeLine } from "./report";
-import { selectOldLikes } from "./select";
+import { selectOldRecords } from "./select";
 import { login } from "./session";
 
 export interface Env {
@@ -10,8 +10,6 @@ export interface Env {
   // A missing Worker secret is rejected before listing.
   BLUESKY_APP_PASSWORD?: string;
 }
-
-type Like = Awaited<ReturnType<typeof listLikes>>[number];
 
 class OldLikesCleaner {
   private readonly password: string;
@@ -22,7 +20,7 @@ class OldLikesCleaner {
 
   async run(runStart: number): Promise<void> {
     const likes = await this.fetchLikes();
-    const { old, skipped } = selectOldLikes(likes, runStart);
+    const { old, skipped } = selectOldRecords(likes, runStart);
     const deleted = await this.deleteOld(old);
     this.report({ found: old.length, deleted, skipped });
   }
@@ -35,7 +33,11 @@ class OldLikesCleaner {
   }
 
   private fetchLikes() {
-    return listLikes({ baseUrl: this.env.BLUESKY_SERVER_URL, did: this.env.BLUESKY_DID });
+    return listRecords({
+      baseUrl: this.env.BLUESKY_SERVER_URL,
+      did: this.env.BLUESKY_DID,
+      collection: LIKE_COLLECTION,
+    });
   }
 
   private login() {
@@ -46,7 +48,7 @@ class OldLikesCleaner {
     });
   }
 
-  private async deleteOld(old: Like[]): Promise<number> {
+  private async deleteOld(old: LikeRecord[]): Promise<number> {
     if (old.length === 0) {
       return 0;
     }
@@ -62,7 +64,7 @@ class OldLikesCleaner {
     return deleted;
   }
 
-  private logDeleted(batch: Like[]): number {
+  private logDeleted(batch: LikeRecord[]): number {
     for (const like of batch) {
       console.log(formatLikeLine(like));
     }

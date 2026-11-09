@@ -1,5 +1,5 @@
 // Shared contract for com.atproto.server.createSession and com.atproto.repo.applyWrites
-// (deletes of app.bsky.feed.like). Holds for the fake; the default suite never sends it to the real server.
+// (deletes of app.bsky.feed.like and app.bsky.feed.repost). Holds for the fake; the default suite never sends it to the real server.
 import { expect } from "vitest";
 import { walkListRecords } from "./list-records.contract";
 
@@ -7,8 +7,10 @@ export interface WriteTarget {
   baseUrl: string;
   did: string;
   appPassword: string;
-  /** URIs of exactly three likes, in this order. */
+  /** URIs of exactly three records of `collection`, in this order. */
   likeUris: [string, string, string];
+  /** Defaults to app.bsky.feed.like. */
+  collection?: "app.bsky.feed.like" | "app.bsky.feed.repost";
 }
 
 interface SessionResponse {
@@ -24,8 +26,8 @@ function rkeyOf(uri: string): string {
   return uri.split("/").at(-1) as string;
 }
 
-function deleteWrite(rkey: string) {
-  return { $type: "com.atproto.repo.applyWrites#delete", collection: "app.bsky.feed.like", rkey };
+function deleteWrite(rkey: string, collection = "app.bsky.feed.like") {
+  return { $type: "com.atproto.repo.applyWrites#delete", collection, rkey };
 }
 
 async function createSession(target: WriteTarget): Promise<SessionResponse> {
@@ -46,7 +48,11 @@ async function applyWrites(
   rkeys: string[],
   accessJwt?: string,
 ): Promise<Response> {
-  return postWrites(target, rkeys.map(deleteWrite), accessJwt);
+  return postWrites(
+    target,
+    rkeys.map((rkey) => deleteWrite(rkey, target.collection)),
+    accessJwt,
+  );
 }
 
 async function postWrites(
@@ -65,7 +71,12 @@ async function postWrites(
 }
 
 async function remainingLikeUris(target: WriteTarget): Promise<string[]> {
-  const pages = await walkListRecords({ baseUrl: target.baseUrl, did: target.did, limit: 100 });
+  const pages = await walkListRecords({
+    baseUrl: target.baseUrl,
+    did: target.did,
+    limit: 100,
+    collection: target.collection,
+  });
   return pages.flat().map((record) => record.uri);
 }
 

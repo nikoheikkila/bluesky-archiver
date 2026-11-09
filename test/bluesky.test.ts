@@ -1,7 +1,7 @@
 // Feature: feature/delete-old-likes.feature
 // Cycles 2-3: list every like across all pages; fail loudly when a request fails.
 import { afterEach, expect, test, vi } from "vitest";
-import { listLikes } from "../src/bluesky";
+import { listLikes, listRecords } from "../src/bluesky";
 import { createFakeBluesky } from "./fake-bluesky";
 
 const DID = "did:plc:fakeaccount000000000000";
@@ -73,4 +73,27 @@ test("fails loudly naming the request when the server answers a page with an err
   expect(error).toBeInstanceOf(Error);
   expect((error as Error).message).toContain("com.atproto.repo.listRecords");
   expect((error as Error).message).toContain("500");
+});
+
+test.each([
+  { kind: "likes", collection: "app.bsky.feed.like", add: "addLike" },
+  { kind: "reposts", collection: "app.bsky.feed.repost", add: "addRepost" },
+] as const)("lists 150 $kind in 3 requests", async ({ collection, add }) => {
+  const bluesky = createFakeBluesky({ did: DID, baseUrl: BASE_URL });
+  const post = bluesky.addPost("a post");
+  const created = Array.from({ length: 150 }, () =>
+    bluesky[add]({ subject: post.uri, createdAt: "2025-01-01T00:00:00.000Z" }),
+  );
+  bluesky.intercept();
+
+  const records = await listRecords({ baseUrl: BASE_URL, did: DID, collection });
+
+  expect(records).toHaveLength(150);
+  expect(records.map((record) => record.uri).sort()).toStrictEqual(
+    created.map((record) => record.uri).sort(),
+  );
+  expect(bluesky.requests()).toHaveLength(3);
+  for (const { url } of bluesky.requests()) {
+    expect(new URL(url).searchParams.get("collection")).toBe(collection);
+  }
 });

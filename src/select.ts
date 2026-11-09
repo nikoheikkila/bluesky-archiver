@@ -1,41 +1,44 @@
-import type { LikeRecord } from "./bluesky";
+import type { LikeRecord, SubjectRecord } from "./bluesky";
 
-export interface Selection {
-  old: LikeRecord[];
+export interface Selection<T extends SubjectRecord = LikeRecord> {
+  old: T[];
   skipped: number;
 }
 
 const YEAR_MS = 365 * 24 * 60 * 60 * 1000;
 
-interface DatedLike {
-  like: LikeRecord;
+interface Dated<T> {
+  record: T;
   time: number;
 }
 
-function parseCreatedAt(like: LikeRecord): number {
+function parseCreatedAt(record: SubjectRecord): number {
   // biome-ignore lint/suspicious/noUnnecessaryConditions: records from the network may lack a value
-  const createdAt: unknown = like.value?.createdAt;
+  const createdAt: unknown = record.value?.createdAt;
   return typeof createdAt === "string" ? Date.parse(createdAt) : Number.NaN;
 }
 
-function withTime(like: LikeRecord): DatedLike {
-  return { like, time: parseCreatedAt(like) };
-}
-
-function isDated(entry: DatedLike): boolean {
+function isDated<T>(entry: Dated<T>): boolean {
   return !Number.isNaN(entry.time);
 }
 
-function byOldestFirst(a: DatedLike, b: DatedLike): number {
+function byOldestFirst<T>(a: Dated<T>, b: Dated<T>): number {
   return a.time - b.time;
 }
 
-export function selectOldLikes(likes: LikeRecord[], runStart: number): Selection {
+export function selectOldRecords<T extends SubjectRecord>(
+  records: T[],
+  runStart: number,
+): Selection<T> {
   const cutoff = runStart - YEAR_MS;
-  const dated = likes.map(withTime).filter(isDated);
+  const dated = records.map((record) => ({ record, time: parseCreatedAt(record) })).filter(isDated);
   const old = dated
     .filter((entry) => entry.time < cutoff)
     .sort(byOldestFirst)
-    .map((entry) => entry.like);
-  return { old, skipped: likes.length - dated.length };
+    .map((entry) => entry.record);
+  return { old, skipped: records.length - dated.length };
+}
+
+export function selectOldLikes(likes: LikeRecord[], runStart: number): Selection {
+  return selectOldRecords(likes, runStart);
 }

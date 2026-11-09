@@ -1,8 +1,8 @@
 // Feature: feature/delete-old-likes.feature
 // Cycle 4: pick the likes older than one year.
 import { expect, test } from "vitest";
-import type { LikeRecord } from "../src/bluesky";
-import { selectOldLikes } from "../src/select";
+import type { LikeRecord, RepostRecord } from "../src/bluesky";
+import { selectOldLikes, selectOldRecords } from "../src/select";
 
 const DAY = 24 * 60 * 60 * 1000;
 const HOUR = 60 * 60 * 1000;
@@ -57,5 +57,43 @@ test("does not select a like created exactly one year before the run starts", ()
   const result = selectOldLikes([exactlyAYear], runStart);
 
   expect(result.old).toStrictEqual([]);
+  expect(result.skipped).toBe(0);
+});
+
+function recordCreatedAt(
+  collection: "app.bsky.feed.like" | "app.bsky.feed.repost",
+  id: string,
+  createdAt: string,
+): LikeRecord | RepostRecord {
+  const subject = {
+    uri: `at://did:plc:someoneelse0000000000000/app.bsky.feed.post/${id}`,
+    cid: `cid-${id}`,
+  };
+  return {
+    uri: `at://did:plc:fakeaccount000000000000/${collection}/${id}`,
+    cid: `record-cid-${id}`,
+    value: { $type: collection, subject, createdAt },
+  } as LikeRecord | RepostRecord;
+}
+
+test.each([
+  { kind: "likes", collection: "app.bsky.feed.like" },
+  { kind: "reposts", collection: "app.bsky.feed.repost" },
+] as const)("selects the $kind older than one year, oldest first", ({ collection }) => {
+  const runStart = Date.parse("2026-11-08T03:00:00Z");
+  const ago = (ms: number) => new Date(runStart - ms).toISOString();
+  const elections = recordCreatedAt(collection, "elections", ago(2 * YEAR));
+  const deletedPost = recordCreatedAt(collection, "deleted-post", ago(400 * DAY));
+  const football = recordCreatedAt(collection, "football", ago(YEAR + HOUR));
+  const cooking = recordCreatedAt(collection, "cooking", ago(YEAR - HOUR));
+  const music = recordCreatedAt(collection, "music", ago(DAY));
+
+  const result = selectOldRecords([music, football, elections, cooking, deletedPost], runStart);
+
+  expect(result.old.map((record) => record.uri)).toStrictEqual([
+    elections.uri,
+    deletedPost.uri,
+    football.uri,
+  ]);
   expect(result.skipped).toBe(0);
 });

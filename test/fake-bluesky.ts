@@ -1,4 +1,4 @@
-import { com } from "@bsky/sdk/lexicons";
+import { app, com } from "@bsky/sdk/lexicons";
 import { vi } from "vitest";
 
 const CID = "bafyreie5737gdxlw5i64vzichcalba3z2v5n6icifvx5xytvske7mr3hpm";
@@ -18,6 +18,19 @@ export interface FakeLike {
   createdAt: string;
 }
 
+export interface FakeRepost {
+  uri: string;
+  subject: string;
+  createdAt: string;
+  via?: string;
+}
+
+export interface FakeQuotePost {
+  uri: string;
+  quoted: string;
+  createdAt: string;
+}
+
 export interface FakeBlueskyOptions {
   did: string;
   baseUrl: string;
@@ -29,6 +42,10 @@ export interface FakeBluesky {
   deletePost(post: FakePost): void;
   addLike(like: { subject: string; createdAt: string }): FakeLike;
   likes(): FakeLike[];
+  addRepost(repost: { subject: string; createdAt: string; via?: string }): FakeRepost;
+  addQuotePost(quote: { quoted: string; createdAt: string }): FakeQuotePost;
+  quotePosts(): FakeQuotePost[];
+  reposts(): FakeRepost[];
   posts(): FakePost[];
   failPage(failure: { cursor: string; status: number }): void;
   failApplyWrites(failure: { call: number; status: number }): void;
@@ -39,11 +56,25 @@ export interface FakeBluesky {
 export function createFakeBluesky(options: FakeBlueskyOptions): FakeBluesky {
   let counter = 0;
   const stored: FakeLike[] = [];
+  const storedReposts: FakeRepost[] = [];
   const storedPosts: FakePost[] = [];
+  const storedQuotes: FakeQuotePost[] = [];
   const served: { method: string; url: string }[] = [];
   const failures = new Map<string, number>();
   const writeFailures = new Map<number, number>();
   let applyWritesCalls = 0;
+  // Likes and reposts are served and deleted the same way; only their record shape differs.
+  const collections = new Map<string, DeletableCollection>([
+    ["app.bsky.feed.like", { stored, toRecord: toLikeRecord, assert: app.bsky.feed.like.$assert }],
+    [
+      "app.bsky.feed.repost",
+      { stored: storedReposts, toRecord: toRepostRecord, assert: app.bsky.feed.repost.$assert },
+    ],
+  ]);
+  const nextUri = (collection: string) => {
+    counter++;
+    return `at://${options.did}/${collection}/${counter}`;
+  };
   return {
     failApplyWrites: ({ call, status }) => {
       writeFailures.set(call, status);
@@ -52,21 +83,16 @@ export function createFakeBluesky(options: FakeBlueskyOptions): FakeBluesky {
       failures.set(cursor, status);
     },
     addPost: () => {
-      counter++;
-      const post = { uri: `at://${options.did}/app.bsky.feed.post/${counter}` };
+      const post = { uri: nextUri("app.bsky.feed.post") };
       storedPosts.push(post);
       return post;
     },
     deletePost: (post) => {
-      const index = storedPosts.findIndex((stored) => stored.uri === post.uri);
-      if (index !== -1) {
-        storedPosts.splice(index, 1);
-      }
+      removeByUri(storedPosts, post.uri);
     },
     addLike: (like) => {
-      counter++;
       const created = {
-        uri: `at://${options.did}/app.bsky.feed.like/${counter}`,
+        uri: nextUri("app.bsky.feed.like"),
         subject: like.subject,
         createdAt: like.createdAt,
       };
@@ -74,6 +100,33 @@ export function createFakeBluesky(options: FakeBlueskyOptions): FakeBluesky {
       return created;
     },
     likes: () => stored,
+    addRepost: (repost) => {
+      const created = {
+        uri: nextUri("app.bsky.feed.repost"),
+        subject: repost.subject,
+        createdAt: repost.createdAt,
+        ...(repost.via === undefined ? {} : { via: repost.via }),
+      };
+      storedReposts.push(created);
+      return created;
+    },
+    reposts: () => storedReposts,
+    addQuotePost: (quote) => {
+      app.bsky.feed.post.$assert({
+        $type: "app.bsky.feed.post",
+        text: "",
+        embed: { $type: "app.bsky.embed.record", record: { uri: quote.quoted, cid: CID } },
+        createdAt: quote.createdAt,
+      });
+      const created = {
+        uri: nextUri("app.bsky.feed.post"),
+        quoted: quote.quoted,
+        createdAt: quote.createdAt,
+      };
+      storedQuotes.push(created);
+      return created;
+    },
+    quotePosts: () => storedQuotes,
     posts: () => storedPosts,
     intercept: () => {
       vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
@@ -129,7 +182,7 @@ export function createFakeBluesky(options: FakeBlueskyOptions): FakeBluesky {
           for (const write of body.writes) {
             if (
               write.$type !== "com.atproto.repo.applyWrites#delete" ||
-              write.collection !== "app.bsky.feed.like"
+              !collections.has(write.collection)
             ) {
               return Response.json(
                 {
@@ -141,10 +194,9 @@ export function createFakeBluesky(options: FakeBlueskyOptions): FakeBluesky {
             }
           }
           for (const write of body.writes) {
-            const uri = `at://${options.did}/app.bsky.feed.like/${write.rkey}`;
-            const index = stored.findIndex((like) => like.uri === uri);
-            if (index !== -1) {
-              stored.splice(index, 1);
+            const uri = `at://${options.did}/${write.collection}/${write.rkey}`;
+            for (const { stored } of collections.values()) {
+              removeByUri(stored, uri);
             }
           }
           const output = { results: [] };
@@ -167,13 +219,17 @@ export function createFakeBluesky(options: FakeBlueskyOptions): FakeBluesky {
             { status: 400 },
           );
         }
-        // The fake holds only likes, so any other collection is empty.
-        if (url.searchParams.get("collection") !== "app.bsky.feed.like") {
+        const collection = collections.get(url.searchParams.get("collection") ?? "");
+        if (collection === undefined) {
           return Response.json({ records: [] });
         }
         const limit = Number(url.searchParams.get("limit") ?? "50");
         const start = Number(url.searchParams.get("cursor") ?? "0");
-        const records = stored.slice(start, start + limit).map(toRecord);
+        const records = collection.stored.slice(start, start + limit).map(collection.toRecord);
+        for (const record of records) {
+          // A missing or malformed createdAt is served as-is; every other field must be valid.
+          collection.assert({ ...record.value, createdAt: "2000-01-01T00:00:00.000Z" });
+        }
         // The real server omits the cursor only on the empty page that ends pagination.
         const output =
           records.length === 0 ? { records } : { cursor: String(start + records.length), records };
@@ -185,14 +241,51 @@ export function createFakeBluesky(options: FakeBlueskyOptions): FakeBluesky {
   };
 }
 
-function toRecord(like: FakeLike) {
+interface ServedRecord {
+  uri: string;
+  cid: string;
+  value: Record<string, unknown>;
+}
+
+interface DeletableCollection {
+  stored: { uri: string }[];
+  // biome-ignore lint/suspicious/noExplicitAny: each collection maps its own stored shape.
+  toRecord: (item: any) => ServedRecord;
+  assert: (value: unknown) => void;
+}
+
+function removeByUri(items: { uri: string }[], uri: string) {
+  const index = items.findIndex((item) => item.uri === uri);
+  if (index !== -1) {
+    items.splice(index, 1);
+  }
+}
+
+function toLikeRecord(like: FakeLike): ServedRecord {
   return {
     uri: like.uri,
     cid: CID,
     value: {
       $type: "app.bsky.feed.like",
       subject: { uri: like.subject, cid: CID },
-      createdAt: like.createdAt,
+      ...withCreatedAt(like.createdAt),
     },
   };
+}
+
+function toRepostRecord(repost: FakeRepost): ServedRecord {
+  return {
+    uri: repost.uri,
+    cid: CID,
+    value: {
+      $type: "app.bsky.feed.repost",
+      subject: { uri: repost.subject, cid: CID },
+      ...withCreatedAt(repost.createdAt),
+      ...(repost.via === undefined ? {} : { via: { uri: repost.via, cid: CID } }),
+    },
+  };
+}
+
+function withCreatedAt(createdAt: string | undefined): { createdAt?: string } {
+  return createdAt === undefined ? {} : { createdAt };
 }

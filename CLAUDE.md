@@ -52,18 +52,20 @@ CI (`.github/workflows/deploy.yml`) runs `task lint`, `task typecheck` and `task
 
 ## Architecture
 
-The pipeline is `listLikes → selectOldLikes → login (createSession) → deleteLikes (applyWrites) →
+The pipeline is `listRecords (app.bsky.feed.like) → selectOldRecords → login (createSession) → deleteLikes (applyWrites) →
 formatLikeLine / formatDeletionSummary → console.log`, wired in `src/index.ts`. Deletion runs in
 batches of at most 200, oldest first, and one line is logged per deleted like after each batch
 succeeds. Login and deletion are skipped when no like is old enough; any non-OK response throws, so
 the run fails without a summary line.
 
-- `src/bluesky.ts` — `listLikes()` pages through the public `com.atproto.repo.listRecords` endpoint
-  (`limit=100`) until an empty page or a missing cursor. It scans every page because record order
-  follows record keys, not `createdAt`.
-- `src/select.ts` — `selectOldLikes(likes, runStart)`: keeps likes with `createdAt` strictly more
-  than 365 × 24 h before `runStart`, oldest first; a missing or unparseable `createdAt` is counted
-  as skipped and never deleted.
+- `src/bluesky.ts` — `listRecords({ baseUrl, did, collection })` pages through the public
+  `com.atproto.repo.listRecords` endpoint for any collection (`limit=100`) until an empty page or a
+  missing cursor. It scans every page, because record order follows record keys, not `createdAt`.
+  `listLikes()` is a thin wrapper over it for `app.bsky.feed.like`.
+- `src/select.ts` — `selectOldRecords(records, runStart)` holds the one age rule. It keeps records
+  whose `createdAt` is strictly more than 365 × 24 h before `runStart`, oldest first. A missing or
+  unparseable `createdAt` is counted as skipped and never selected. `selectOldLikes` is a thin
+  wrapper over it.
 - `src/session.ts` — `login()` returns `fetchHandler(path, init)`, the atproto `Agent` shape. The
   deletion code depends only on `fetchHandler`, not on a raw token.
 - `src/delete.ts` — `deleteLikes()`: `com.atproto.repo.applyWrites` deletes in batches of at most 200.
@@ -77,16 +79,26 @@ the run fails without a summary line.
 
 - Every test runs against `test/fake-bluesky.ts`, an in-process fake that replaces global `fetch` via
   `vi.spyOn` (`fetchMock` isn't available in this pool version). It rejects any other origin, so the
-  default suite never reaches the network. It serves `listRecords`, `createSession` and
-  `applyWrites` (deletes of `app.bsky.feed.like` only, at most 200 per call), validates every
-  request and response against the official lexicons shipped in `@bsky/sdk`, and offers failure
-  injection (`failPage` per cursor, `failApplyWrites` per call). The test harness can also delete
-  posts (likes remain, as on the real server).
-- **The fake must behave like the real server.** Every non-empty page carries a cursor, even the
-  last partial one; paging ends on an empty page without a cursor. `test/contract/` holds the shared
-  contract suites (`list-records.contract.ts` and `write.contract.ts`), run against the fake by
-  `test/contract/fake.test.ts` in the default suite. No contract runs against the real server any
-  more, and no test may reach it. Change the fake only together with its contract.
+  default suite never reaches the network. It serves `createSession`, `listRecords` and
+  `applyWrites`, and offers failure injection (`failPage` per cursor, `failApplyWrites` per call).
+  `listRecords` serves `app.bsky.feed.like` and `app.bsky.feed.repost`. `applyWrites` accepts
+  deletes of those two collections only, at most 200 per call; it rejects anything else, including
+  deletes of `app.bsky.feed.post`, with HTTP 400 and deletes nothing in that case. The fake also
+  models the account's quote posts (`app.bsky.feed.post` records with an `app.bsky.embed.record`
+  embed): tests store them and read them back, but `listRecords` never lists them. The test harness
+  can also delete posts (likes and reposts remain, as on the real server).
+- The fake validates every request and response against the official lexicons shipped in
+  `@bsky/sdk`. Every like and repost record it serves, and every quote post it stores, is validated
+  against its record lexicon from `@bsky/sdk`. For like and repost records it serves, a missing or
+  malformed `createdAt` is allowed, because undatable records exist on the real server when they are
+  written without validation. Every other field is still checked. Quote posts are validated in full,
+  `createdAt` included, when stored.
+- **The fake must behave like the real server.** Likes and reposts page the same way: every
+  non-empty page carries a cursor, even the last partial one, and paging ends on an empty page
+  without a cursor. `test/contract/` holds the shared contract suites (`list-records.contract.ts`
+  and `write.contract.ts`), run against the fake by `test/contract/fake.test.ts` in the default
+  suite. No contract runs against the real server any more, and no test may reach it. Change the
+  fake only together with its contract.
 - Tests fix the run start explicitly so they pass at any wall-clock time.
 - `test/delete-old-likes.acceptance.test.ts` drives the Worker's `scheduled` entry point for the
   scenario in `feature/delete-old-likes.feature`.
@@ -96,6 +108,12 @@ the run fails without a summary line.
 
 - The Worker sends only `GET listRecords`, `POST createSession` and `POST applyWrites` (deletes of
   `app.bsky.feed.like` records only); it never calls `deleteSession`.
+- The age rule is a global invariant and applies to every record kind the Worker deletes. A record
+  is older than one year when its own `createdAt` is more than 365 × 24 h before the run starts; the
+  run start is `controller.scheduledTime`, and the comparison is in UTC. A record whose subject was
+  deleted, or whose author has left, is judged by its own `createdAt` too. A record with a missing
+  or unparseable `createdAt` is never deleted. Once the backlog is cleared, no record is older than
+  366 days.
 - It holds one secret, `BLUESKY_APP_PASSWORD`, a Worker secret whose `.env` entry is an `op://`
   reference, never the value. The password must never appear in logs, errors, or the repository.
 - Any Cloudflare resource (KV, D1, R2, Durable Objects, and so on) is allowed when its usage stays
