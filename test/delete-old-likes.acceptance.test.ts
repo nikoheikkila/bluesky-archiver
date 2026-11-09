@@ -2,7 +2,7 @@
 // Scenario: Daily run deletes only likes older than one year
 import { createScheduledController, env } from "cloudflare:test";
 import { expect, test } from "vitest";
-import { createWorker } from "../src/worker";
+import { createWorker, type LogEntry } from "../src/worker";
 import { createFakeBluesky } from "./fake-bluesky";
 
 const HOUR = 60 * 60 * 1000;
@@ -24,23 +24,28 @@ test("Daily run deletes only likes older than one year", async () => {
   const football = bluesky.addPost("a post about football");
   const cooking = bluesky.addPost("a post about cooking");
   const music = bluesky.addPost("a post about music");
-  const electionsCreatedAt = createdBefore(2 * YEAR);
-  const deletedCreatedAt = createdBefore(400 * DAY);
-  const footballCreatedAt = createdBefore(YEAR + HOUR);
-
-  bluesky.addLike({ subject: elections.uri, createdAt: electionsCreatedAt });
-  bluesky.addLike({ subject: deleted.uri, createdAt: deletedCreatedAt });
-  bluesky.addLike({ subject: football.uri, createdAt: footballCreatedAt });
+  const electionsLike = bluesky.addLike({
+    subject: elections.uri,
+    createdAt: createdBefore(2 * YEAR),
+  });
+  const deletedLike = bluesky.addLike({
+    subject: deleted.uri,
+    createdAt: createdBefore(400 * DAY),
+  });
+  const footballLike = bluesky.addLike({
+    subject: football.uri,
+    createdAt: createdBefore(YEAR + HOUR),
+  });
   bluesky.addLike({ subject: cooking.uri, createdAt: createdBefore(YEAR - HOUR) });
   bluesky.addLike({ subject: music.uri, createdAt: createdBefore(DAY) });
   bluesky.deletePost(deleted);
   expect(bluesky.posts().map((post) => post.uri)).not.toContain(deleted.uri);
   expect(bluesky.likes().map((like) => like.subject)).toContain(deleted.uri);
-  const lines: string[] = [];
+  const entries: LogEntry[] = [];
   const worker = createWorker({
     fetch: bluesky.fetch,
-    log: (line) => {
-      lines.push(line);
+    log: (entry) => {
+      entries.push(entry);
     },
   });
   const workerEnv = { ...env, BLUESKY_APP_PASSWORD: APP_PASSWORD };
@@ -48,12 +53,12 @@ test("Daily run deletes only likes older than one year", async () => {
   const controller = createScheduledController({ scheduledTime: runStart });
   await worker.scheduled(controller, workerEnv);
 
-  expect(lines).toStrictEqual([
-    `${electionsCreatedAt} ${elections.uri}`,
-    `${deletedCreatedAt} ${deleted.uri}`,
-    `${footballCreatedAt} ${football.uri}`,
-    "Deleted 3 of 3 likes older than one year",
-    "No reposts are older than one year",
+  expect(entries).toStrictEqual([
+    { level: "debug", message: `deleting like ${electionsLike.uri}` },
+    { level: "debug", message: `deleting like ${deletedLike.uri}` },
+    { level: "debug", message: `deleting like ${footballLike.uri}` },
+    { level: "info", message: "Deleted 3 of 3 likes older than one year" },
+    { level: "info", message: "No reposts are older than one year" },
   ]);
   expect(bluesky.likes().map((like) => like.subject)).toStrictEqual([cooking.uri, music.uri]);
 });

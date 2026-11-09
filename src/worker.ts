@@ -19,10 +19,21 @@ export interface Env {
   BLUESKY_APP_PASSWORD?: string;
 }
 
-/** The run's I/O: every request goes through `fetch` and every report line through `log`. */
+/** A report line's level; `src/index.ts` writes it with the `console` method of the same name. */
+export type LogLevel = "debug" | "info";
+
+export interface LogEntry {
+  level: LogLevel;
+  message: string;
+}
+
+/**
+ * The run's I/O: every request goes through `fetch` and every report line through `log`, at debug
+ * for each deleted record and at info for each summary line.
+ */
 export interface Dependencies {
   fetch: Fetch;
-  log: (line: string) => void;
+  log: (entry: LogEntry) => void;
 }
 
 class OldRecordsCleaner {
@@ -45,7 +56,7 @@ class OldRecordsCleaner {
   private async clean(collection: Collection, noun: RecordNoun, runStart: number): Promise<void> {
     const records = await this.fetchRecords(collection);
     const { old, skipped } = selectOldRecords(records, runStart);
-    const deleted = await this.deleteOld(collection, old);
+    const deleted = await this.deleteOld(collection, noun, old);
     this.report({ found: old.length, deleted, skipped }, noun);
   }
 
@@ -74,7 +85,11 @@ class OldRecordsCleaner {
     });
   }
 
-  private async deleteOld(collection: Collection, old: SubjectRecord[]): Promise<number> {
+  private async deleteOld(
+    collection: Collection,
+    noun: RecordNoun,
+    old: SubjectRecord[],
+  ): Promise<number> {
     if (old.length === 0) {
       return 0;
     }
@@ -87,22 +102,22 @@ class OldRecordsCleaner {
       did: this.env.BLUESKY_DID,
       fetchHandler: session.fetchHandler,
       onBatchDeleted: (batch) => {
-        deleted += this.logDeleted(batch);
+        deleted += this.logDeleted(batch, noun);
       },
     });
     return deleted;
   }
 
-  private logDeleted(batch: SubjectRecord[]): number {
+  private logDeleted(batch: SubjectRecord[], noun: RecordNoun): number {
     for (const record of batch) {
-      this.deps.log(formatRecordLine(record));
+      this.deps.log({ level: "debug", message: formatRecordLine(record, noun) });
     }
     return batch.length;
   }
 
   private report(summary: Parameters<typeof formatDeletionSummary>[0], noun: RecordNoun): void {
-    for (const line of formatDeletionSummary(summary, noun)) {
-      this.deps.log(line);
+    for (const message of formatDeletionSummary(summary, noun)) {
+      this.deps.log({ level: "info", message });
     }
   }
 }

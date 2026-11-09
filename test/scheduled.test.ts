@@ -2,7 +2,7 @@
 // Cycle 5: wire the daily run.
 import { createScheduledController, env } from "cloudflare:test";
 import { expect, test } from "vitest";
-import { createWorker } from "../src/worker";
+import { createWorker, type LogEntry } from "../src/worker";
 import { createFakeBluesky, type FakeBluesky, type NewRepost } from "./fake-bluesky";
 
 const RUN_START = Date.parse("2026-11-08T03:00:00Z");
@@ -14,6 +14,11 @@ const NO_OLD_LIKES = "No likes are older than one year";
 const NO_OLD_REPOSTS = "No reposts are older than one year";
 
 const createdAgo = (ms: number) => new Date(RUN_START - ms).toISOString();
+const info = (message: string): LogEntry => ({ level: "info", message });
+const deleting = (noun: "like" | "repost", record: { uri: string }): LogEntry => ({
+  level: "debug",
+  message: `deleting ${noun} ${record.uri}`,
+});
 
 function newBluesky() {
   return createFakeBluesky({
@@ -23,18 +28,23 @@ function newBluesky() {
   });
 }
 
-/** One scheduled run against the fake, with the app password it is given; `lines` collects its log. */
+/**
+ * One scheduled run against the fake, with the app password it is given; `entries` collects its
+ * log with levels, and `lines` the same log's messages only.
+ */
 function newRun(bluesky: FakeBluesky, password: string | undefined) {
+  const entries: LogEntry[] = [];
   const lines: string[] = [];
   const worker = createWorker({
     fetch: bluesky.fetch,
-    log: (line) => {
-      lines.push(line);
+    log: (entry) => {
+      entries.push(entry);
+      lines.push(entry.message);
     },
   });
   const controller = createScheduledController({ scheduledTime: RUN_START, cron: "0 3 * * *" });
   const run = () => worker.scheduled(controller, { ...env, BLUESKY_APP_PASSWORD: password });
-  return { lines, run };
+  return { entries, lines, run };
 }
 
 const requestsTo = (bluesky: FakeBluesky, method: string) =>
@@ -76,11 +86,11 @@ test("reports no old likes and neither logs in nor deletes when every like is yo
     { subject: post.uri, createdAt: createdAgo(1 * DAY) },
     { subject: post.uri, createdAt: createdAgo(364 * DAY) },
   ]);
-  const { lines, run } = newRun(bluesky, APP_PASSWORD);
+  const { entries, run } = newRun(bluesky, APP_PASSWORD);
 
   await expect(run()).resolves.toBeUndefined();
 
-  expect(lines).toStrictEqual([NO_OLD_LIKES, NO_OLD_REPOSTS]);
+  expect(entries).toStrictEqual([info(NO_OLD_LIKES), info(NO_OLD_REPOSTS)]);
   expect(requestsTo(bluesky, "com.atproto.server.createSession")).toHaveLength(0);
   expect(requestsTo(bluesky, "com.atproto.repo.applyWrites")).toHaveLength(0);
   expect(bluesky.likes()).toHaveLength(2);
@@ -88,11 +98,11 @@ test("reports no old likes and neither logs in nor deletes when every like is yo
 
 test("reports no old likes or reposts after one listing request each when the account has none", async () => {
   const bluesky = newBluesky();
-  const { lines, run } = newRun(bluesky, APP_PASSWORD);
+  const { entries, run } = newRun(bluesky, APP_PASSWORD);
 
   await expect(run()).resolves.toBeUndefined();
 
-  expect(lines).toStrictEqual([NO_OLD_LIKES, NO_OLD_REPOSTS]);
+  expect(entries).toStrictEqual([info(NO_OLD_LIKES), info(NO_OLD_REPOSTS)]);
   expect(bluesky.requests().map((request) => new URL(request.url).pathname)).toStrictEqual([
     "/xrpc/com.atproto.repo.listRecords",
     "/xrpc/com.atproto.repo.listRecords",
@@ -118,15 +128,19 @@ test("keeps the deleted likes logged after a failed batch and deletes the rest o
   const bluesky = newBluesky();
   const post = bluesky.addPost("a post");
   const createdAts = Array.from({ length: 450 }, (_, i) => createdAgo(400 * DAY + i * HOUR));
-  bluesky.addLikes(createdAts.map((createdAt) => ({ subject: post.uri, createdAt })));
+  const likes = bluesky.addLikes(createdAts.map((createdAt) => ({ subject: post.uri, createdAt })));
   bluesky.failApplyWrites({ call: 2, status: 500 });
   const firstRun = newRun(bluesky, APP_PASSWORD);
 
   const error = await firstRun.run().catch((e: unknown) => e);
 
   expect(error).toBeInstanceOf(Error);
-  expect(firstRun.lines).toHaveLength(200);
-  expect(firstRun.lines.filter((line) => /older than one year/.test(line))).toStrictEqual([]);
+  expect(firstRun.entries).toStrictEqual(
+    likes
+      .slice(250)
+      .reverse()
+      .map((like) => deleting("like", like)),
+  );
   expect(bluesky.likes().map((like) => like.createdAt)).toStrictEqual(createdAts.slice(0, 250));
   expect([...firstRun.lines, String(error)].join("\n")).not.toContain(APP_PASSWORD);
 
@@ -134,9 +148,9 @@ test("keeps the deleted likes logged after a failed batch and deletes the rest o
 
   await expect(secondRun.run()).resolves.toBeUndefined();
 
-  expect(secondRun.lines.slice(-2)).toStrictEqual([
-    "Deleted 250 of 250 likes older than one year",
-    NO_OLD_REPOSTS,
+  expect(secondRun.entries.slice(-2)).toStrictEqual([
+    info("Deleted 250 of 250 likes older than one year"),
+    info(NO_OLD_REPOSTS),
   ]);
   expect(bluesky.likes()).toStrictEqual([]);
 });
@@ -145,20 +159,20 @@ test("deletes only the datable old like and reports the undatable likes as skipp
   const bluesky = newBluesky();
   const post = bluesky.addPost("a post");
   const createdAt = createdAgo(400 * DAY);
-  const [noDate, notADate] = bluesky.addLikes([
+  const [noDate, notADate, old] = bluesky.addLikes([
     { subject: post.uri, createdAt: "" },
     { subject: post.uri, createdAt: "not-a-date" },
     { subject: post.uri, createdAt },
   ]);
-  const { lines, run } = newRun(bluesky, APP_PASSWORD);
+  const { entries, run } = newRun(bluesky, APP_PASSWORD);
 
   await expect(run()).resolves.toBeUndefined();
 
-  expect(lines).toStrictEqual([
-    `${createdAt} ${post.uri}`,
-    "Skipped 2 likes without a valid creation time",
-    "Deleted 1 of 1 like older than one year",
-    NO_OLD_REPOSTS,
+  expect(entries).toStrictEqual([
+    deleting("like", old),
+    info("Skipped 2 likes without a valid creation time"),
+    info("Deleted 1 of 1 like older than one year"),
+    info(NO_OLD_REPOSTS),
   ]);
   expect(bluesky.likes()).toStrictEqual([noDate, notADate]);
 });
@@ -200,19 +214,15 @@ test("fails without deleting or reporting a total when the login is rejected", a
 test("deletes old likes before listing reposts, then old reposts, with a single login", async () => {
   const bluesky = newBluesky();
   const post = bluesky.addPost("a post");
-  const olderLike = createdAgo(401 * DAY);
-  const newerLike = createdAgo(400 * DAY);
-  const olderRepost = createdAgo(401 * DAY + HOUR);
-  const newerRepost = createdAgo(400 * DAY + HOUR);
-  bluesky.addLikes([
-    { subject: post.uri, createdAt: newerLike },
-    { subject: post.uri, createdAt: olderLike },
+  const [newerLike, olderLike] = bluesky.addLikes([
+    { subject: post.uri, createdAt: createdAgo(400 * DAY) },
+    { subject: post.uri, createdAt: createdAgo(401 * DAY) },
   ]);
-  bluesky.addReposts([
-    { subject: post.uri, createdAt: newerRepost },
-    { subject: post.uri, createdAt: olderRepost },
+  const [newerRepost, olderRepost] = bluesky.addReposts([
+    { subject: post.uri, createdAt: createdAgo(400 * DAY + HOUR) },
+    { subject: post.uri, createdAt: createdAgo(401 * DAY + HOUR) },
   ]);
-  const { lines, run } = newRun(bluesky, APP_PASSWORD);
+  const { entries, run } = newRun(bluesky, APP_PASSWORD);
 
   await expect(run()).resolves.toBeUndefined();
 
@@ -224,13 +234,13 @@ test("deletes old likes before listing reposts, then old reposts, with a single 
     "repo.applyWrites",
   ]);
   expect(requestsTo(bluesky, "com.atproto.server.createSession")).toHaveLength(1);
-  expect(lines).toStrictEqual([
-    `${olderLike} ${post.uri}`,
-    `${newerLike} ${post.uri}`,
-    "Deleted 2 of 2 likes older than one year",
-    `${olderRepost} ${post.uri}`,
-    `${newerRepost} ${post.uri}`,
-    "Deleted 2 of 2 reposts older than one year",
+  expect(entries).toStrictEqual([
+    deleting("like", olderLike),
+    deleting("like", newerLike),
+    info("Deleted 2 of 2 likes older than one year"),
+    deleting("repost", olderRepost),
+    deleting("repost", newerRepost),
+    info("Deleted 2 of 2 reposts older than one year"),
   ]);
   expect(bluesky.likes()).toStrictEqual([]);
   expect(bluesky.reposts()).toStrictEqual([]);
@@ -243,11 +253,11 @@ test("reports no old reposts and neither logs in nor deletes when every repost i
     { subject: post.uri, createdAt: createdAgo(1 * DAY) },
     { subject: post.uri, createdAt: createdAgo(364 * DAY) },
   ]);
-  const { lines, run } = newRun(bluesky, APP_PASSWORD);
+  const { entries, run } = newRun(bluesky, APP_PASSWORD);
 
   await expect(run()).resolves.toBeUndefined();
 
-  expect(lines).toStrictEqual([NO_OLD_LIKES, NO_OLD_REPOSTS]);
+  expect(entries).toStrictEqual([info(NO_OLD_LIKES), info(NO_OLD_REPOSTS)]);
   expect(requestsTo(bluesky, "com.atproto.server.createSession")).toHaveLength(0);
   expect(requestsTo(bluesky, "com.atproto.repo.applyWrites")).toHaveLength(0);
   expect(bluesky.reposts()).toHaveLength(2);
@@ -257,9 +267,8 @@ test("logs in after listing reposts when only a repost is older than one year", 
   const bluesky = newBluesky();
   const post = bluesky.addPost("a post");
   const like = bluesky.addLike({ subject: post.uri, createdAt: createdAgo(1 * DAY) });
-  const repostCreatedAt = createdAgo(400 * DAY);
-  bluesky.addRepost({ subject: post.uri, createdAt: repostCreatedAt });
-  const { lines, run } = newRun(bluesky, APP_PASSWORD);
+  const repost = bluesky.addRepost({ subject: post.uri, createdAt: createdAgo(400 * DAY) });
+  const { entries, run } = newRun(bluesky, APP_PASSWORD);
 
   await expect(run()).resolves.toBeUndefined();
 
@@ -270,10 +279,10 @@ test("logs in after listing reposts when only a repost is older than one year", 
     "repo.applyWrites",
   ]);
   expect(requestsTo(bluesky, "com.atproto.server.createSession")).toHaveLength(1);
-  expect(lines).toStrictEqual([
-    NO_OLD_LIKES,
-    `${repostCreatedAt} ${post.uri}`,
-    "Deleted 1 of 1 repost older than one year",
+  expect(entries).toStrictEqual([
+    info(NO_OLD_LIKES),
+    deleting("repost", repost),
+    info("Deleted 1 of 1 repost older than one year"),
   ]);
   expect(bluesky.likes()).toStrictEqual([like]);
   expect(bluesky.reposts()).toStrictEqual([]);
@@ -299,29 +308,24 @@ test("stays within 31 requests when deleting 1 old like out of 2,047 and 193 old
 test("keeps the deleted likes and reposts logged after a failed repost batch and deletes the rest on the next run", async () => {
   const bluesky = newBluesky();
   const post = bluesky.addPost("a post");
-  const likeCreatedAt = createdAgo(400 * DAY);
-  bluesky.addLike({ subject: post.uri, createdAt: likeCreatedAt });
+  const like = bluesky.addLike({ subject: post.uri, createdAt: createdAgo(400 * DAY) });
   const repostCreatedAts = Array.from({ length: 450 }, (_, i) => createdAgo(400 * DAY + i * HOUR));
-  bluesky.addReposts(repostCreatedAts.map((createdAt) => ({ subject: post.uri, createdAt })));
+  const reposts = bluesky.addReposts(
+    repostCreatedAts.map((createdAt) => ({ subject: post.uri, createdAt })),
+  );
   bluesky.failApplyWrites({ call: 3, status: 500 });
   const firstRun = newRun(bluesky, APP_PASSWORD);
 
   await expect(firstRun.run()).rejects.toThrow();
 
-  expect(firstRun.lines).toHaveLength(202);
-  expect(firstRun.lines.slice(0, 2)).toStrictEqual([
-    `${likeCreatedAt} ${post.uri}`,
-    "Deleted 1 of 1 like older than one year",
-  ]);
-  expect(firstRun.lines.slice(2)).toStrictEqual(
-    repostCreatedAts
+  expect(firstRun.entries).toStrictEqual([
+    deleting("like", like),
+    info("Deleted 1 of 1 like older than one year"),
+    ...reposts
       .slice(250)
       .reverse()
-      .map((createdAt) => `${createdAt} ${post.uri}`),
-  );
-  expect(firstRun.lines.filter((line) => /reposts older than one year/.test(line))).toStrictEqual(
-    [],
-  );
+      .map((repost) => deleting("repost", repost)),
+  ]);
   expect(bluesky.likes()).toStrictEqual([]);
   expect(bluesky.reposts().map((repost) => repost.createdAt)).toStrictEqual(
     repostCreatedAts.slice(0, 250),
@@ -331,9 +335,14 @@ test("keeps the deleted likes and reposts logged after a failed repost batch and
 
   await expect(secondRun.run()).resolves.toBeUndefined();
 
-  expect(secondRun.lines).toHaveLength(252);
-  expect(secondRun.lines[0]).toBe(NO_OLD_LIKES);
-  expect(secondRun.lines.at(-1)).toBe("Deleted 250 of 250 reposts older than one year");
+  expect(secondRun.entries).toStrictEqual([
+    info(NO_OLD_LIKES),
+    ...reposts
+      .slice(0, 250)
+      .reverse()
+      .map((repost) => deleting("repost", repost)),
+    info("Deleted 250 of 250 reposts older than one year"),
+  ]);
   expect(bluesky.reposts()).toStrictEqual([]);
 });
 
@@ -383,16 +392,15 @@ test("deletes the old repost but leaves an old quote post and names no post coll
   const bluesky = newBluesky();
   const post = bluesky.addPost("a post");
   const quote = bluesky.addQuotePost({ quoted: post.uri, createdAt: createdAgo(400 * DAY) });
-  const repostCreatedAt = createdAgo(400 * DAY);
-  bluesky.addRepost({ subject: post.uri, createdAt: repostCreatedAt });
-  const { lines, run } = newRun(bluesky, APP_PASSWORD);
+  const repost = bluesky.addRepost({ subject: post.uri, createdAt: createdAgo(400 * DAY) });
+  const { entries, run } = newRun(bluesky, APP_PASSWORD);
 
   await expect(run()).resolves.toBeUndefined();
 
-  expect(lines).toStrictEqual([
-    NO_OLD_LIKES,
-    `${repostCreatedAt} ${post.uri}`,
-    "Deleted 1 of 1 repost older than one year",
+  expect(entries).toStrictEqual([
+    info(NO_OLD_LIKES),
+    deleting("repost", repost),
+    info("Deleted 1 of 1 repost older than one year"),
   ]);
   expect(bluesky.reposts()).toStrictEqual([]);
   expect(bluesky.quotePosts()).toStrictEqual([quote]);
@@ -407,17 +415,16 @@ test("deletes the old repost but leaves an old quote post and names no post coll
 test("fails after the likes total, with no reposts total or repost write, when listing a repost page fails", async () => {
   const bluesky = newBluesky();
   const post = bluesky.addPost("a post");
-  const likeCreatedAt = createdAgo(400 * DAY);
-  bluesky.addLike({ subject: post.uri, createdAt: likeCreatedAt });
+  const like = bluesky.addLike({ subject: post.uri, createdAt: createdAgo(400 * DAY) });
   bluesky.addReposts(Array(150).fill({ subject: post.uri, createdAt: createdAgo(400 * DAY) }));
   bluesky.failPage({ cursor: "100", status: 500 });
-  const { lines, run } = newRun(bluesky, APP_PASSWORD);
+  const { entries, run } = newRun(bluesky, APP_PASSWORD);
 
   await expect(run()).rejects.toThrow();
 
-  expect(lines).toStrictEqual([
-    `${likeCreatedAt} ${post.uri}`,
-    "Deleted 1 of 1 like older than one year",
+  expect(entries).toStrictEqual([
+    deleting("like", like),
+    info("Deleted 1 of 1 like older than one year"),
   ]);
   expect(listedCollections(bluesky)).toStrictEqual([
     "app.bsky.feed.like",
@@ -436,12 +443,12 @@ test("fails with no reposts total and keeps the repost when the login is rejecte
   const post = bluesky.addPost("a post");
   bluesky.addLike({ subject: post.uri, createdAt: createdAgo(1 * DAY) });
   bluesky.addRepost({ subject: post.uri, createdAt: createdAgo(400 * DAY) });
-  const { lines, run } = newRun(bluesky, WRONG_PASSWORD);
+  const { entries, lines, run } = newRun(bluesky, WRONG_PASSWORD);
 
   const error = await run().catch((e: unknown) => e);
 
   expect(error).toBeInstanceOf(Error);
-  expect(lines).toStrictEqual([NO_OLD_LIKES]);
+  expect(entries).toStrictEqual([info(NO_OLD_LIKES)]);
   expect(requestPhases(bluesky)).toStrictEqual([
     "listRecords app.bsky.feed.like",
     "listRecords app.bsky.feed.repost",
@@ -456,20 +463,20 @@ test("deletes only the datable old repost and reports the undatable reposts as s
   const bluesky = newBluesky();
   const post = bluesky.addPost("a post");
   const createdAt = createdAgo(400 * DAY);
-  const [noDate, notADate] = bluesky.addReposts([
+  const [noDate, notADate, old] = bluesky.addReposts([
     { subject: post.uri } as unknown as NewRepost,
     { subject: post.uri, createdAt: "not-a-date" },
     { subject: post.uri, createdAt },
   ]);
-  const { lines, run } = newRun(bluesky, APP_PASSWORD);
+  const { entries, run } = newRun(bluesky, APP_PASSWORD);
 
   await expect(run()).resolves.toBeUndefined();
 
-  expect(lines).toStrictEqual([
-    NO_OLD_LIKES,
-    `${createdAt} ${post.uri}`,
-    "Skipped 2 reposts without a valid creation time",
-    "Deleted 1 of 1 repost older than one year",
+  expect(entries).toStrictEqual([
+    info(NO_OLD_LIKES),
+    deleting("repost", old),
+    info("Skipped 2 reposts without a valid creation time"),
+    info("Deleted 1 of 1 repost older than one year"),
   ]);
   expect(bluesky.reposts()).toStrictEqual([noDate, notADate]);
 });

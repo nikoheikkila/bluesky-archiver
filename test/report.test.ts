@@ -29,14 +29,12 @@ function repost(id: string, createdAt: string): RepostRecord {
 const first = like("1", "2024-01-01T00:00:00.000Z");
 const second = like("2", "2024-02-01T00:00:00.000Z");
 
-const firstLine =
-  "2024-01-01T00:00:00.000Z at://did:plc:someoneelse0000000000000/app.bsky.feed.post/1";
-const secondLine =
-  "2024-02-01T00:00:00.000Z at://did:plc:someoneelse0000000000000/app.bsky.feed.post/2";
+const firstLine = "deleting like at://did:plc:fakeaccount000000000000/app.bsky.feed.like/1";
+const secondLine = "deleting like at://did:plc:fakeaccount000000000000/app.bsky.feed.like/2";
 
 const firstRepost = repost("3", "2024-03-01T00:00:00.000Z");
 const firstRepostLine =
-  "2024-03-01T00:00:00.000Z at://did:plc:someoneelse0000000000000/app.bsky.feed.post/3";
+  "deleting repost at://did:plc:fakeaccount000000000000/app.bsky.feed.repost/3";
 
 // Cycle 4: format the deletion report.
 test.each([
@@ -46,13 +44,17 @@ test.each([
   expect(formatLikeLine(subject)).toStrictEqual(expected);
 });
 
-test.each([{ name: "repost", subject: firstRepost, expected: firstRepostLine }])(
-  "formats the $name as a record line",
-  ({ subject, expected }) => {
-    expect(formatRecordLine(subject)).toStrictEqual(expected);
-    expect(formatRecordLine(subject).endsWith(".")).toBe(false);
-  },
-);
+test.each([
+  { name: "like", subject: first, noun: "like" as const, expected: firstLine },
+  { name: "repost", subject: firstRepost, noun: "repost" as const, expected: firstRepostLine },
+])("formats the $name as a record line", ({ subject, noun, expected }) => {
+  expect(formatRecordLine(subject, noun)).toStrictEqual(expected);
+  expect(formatRecordLine(subject, noun).endsWith(".")).toBe(false);
+});
+
+test("formats a record line as a like when no noun is given", () => {
+  expect(formatRecordLine(first)).toStrictEqual(firstLine);
+});
 
 const deletionSummaries = [
   {

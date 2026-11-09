@@ -12,8 +12,8 @@ function plural(count: number, noun: RecordNoun): string {
   return count === 1 ? noun : `${noun}s`;
 }
 
-export function formatRecordLine(record: SubjectRecord): string {
-  return `${record.value.createdAt} ${record.value.subject.uri}`;
+export function formatRecordLine(record: SubjectRecord, noun: RecordNoun = "like"): string {
+  return `deleting ${noun} ${record.uri}`;
 }
 
 export const formatLikeLine = formatRecordLine;

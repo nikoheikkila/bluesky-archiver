@@ -39,14 +39,14 @@ The pipeline is already collection-agnostic. A new kind needs these changes:
 
 - `src/bluesky.ts`: add the record type to the `SubjectRecord` union, which extends `Collection`.
   Records without a `subject` (posts) do not fit `SubjectRecord`, so posts need a wider record type.
-- `src/report.ts`: extend `RecordNoun`. `formatRecordLine` prints `<createdAt> <subject URI>`, so a
-  kind without a subject needs its own line format, fixed in the spec.
+- `src/report.ts`: extend `RecordNoun`. `formatRecordLine` prints `deleting <noun> <record URI>`
+  from the record's own `uri`, so it fits any kind, subject or not.
 - `src/select.ts` (`selectOldRecords`) and `src/delete.ts` (`deleteRecords`) take any collection
   as they are.
 
 ## 4. Wiring
 
-- `src/index.ts`: `OldRecordsCleaner.run()` calls `clean(collection, noun, runStart)` once per
+- `src/worker.ts`: `OldRecordsCleaner.run()` calls `clean(collection, noun, runStart)` once per
   kind, in order. Add the new kind after the existing ones. The session is shared, so login still
   happens at most once, and a failure stops the kinds that follow.
 - Only this cycle changes what the deployed Worker does, so keep it last and commit it on its own.
@@ -64,13 +64,13 @@ grep -n 'requests' test/scheduled.test.ts
 
 ## 6. Documentation in the same cycles
 
-- `CLAUDE.md`: "What this is", the Architecture pipeline, the fake paragraph (cycle 1), and the
+- `AGENTS.md`: "What this is", the Architecture pipeline, the fake paragraph (cycle 1), and the
   Constraints on which collections `listRecords` and `applyWrites` may name (wiring cycle).
 - `README.md`: what gets deleted.
 
 ## Notes for the posts slice
 
-- Today `app.bsky.feed.post` is forbidden everywhere. The Constraints in `CLAUDE.md` exclude it,
+- Today `app.bsky.feed.post` is forbidden everywhere. The Constraints in `AGENTS.md` exclude it,
   the fake rejects deleting it, and `test/scheduled.test.ts` asserts that no request names it (the
   quote-post test). A posts slice must change each of these on purpose.
 - The pinned post must be kept. It is referenced from the profile record (`app.bsky.actor.profile`,

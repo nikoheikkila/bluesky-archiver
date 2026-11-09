@@ -81,8 +81,8 @@ Cloudflare dashboard, which keeps 3 days on the Free plan.
   in-process fake Bluesky server (`test/fake-bluesky.ts`), and no test reaches the real one.
 - Do not trigger the scheduled handler under `task dev`: it would delete from the real account.
 - Work is spec-driven. Each change starts as a spec with one Gherkin scenario (`feature/`) and a
-  plan of TDD cycles; the specs themselves stay local. `CLAUDE.md` and `AGENTS.md` describe the
-  architecture and working rules for coding agents.
+  plan of TDD cycles; the specs themselves stay local. `AGENTS.md` describes the architecture
+  and working rules for coding agents.
 
 ## License
 
