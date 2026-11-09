@@ -39,9 +39,9 @@ const toSubjectRecord =
       },
     }) as SubjectRecord;
 
-async function deletionOf450({ collection, add, stored }: (typeof KINDS)[number]) {
+async function deletionOf({ collection, add, stored }: (typeof KINDS)[number], count = 450) {
   const bluesky = createFakeBluesky({ did: DID, baseUrl: BASE_URL, appPassword: APP_PASSWORD });
-  const records = bluesky[add](seeds(450)).map(toSubjectRecord(collection));
+  const records = bluesky[add](seeds(count)).map(toSubjectRecord(collection));
   const session = await login({
     baseUrl: BASE_URL,
     did: DID,
@@ -61,7 +61,7 @@ async function deletionOf450({ collection, add, stored }: (typeof KINDS)[number]
 }
 
 test.each(KINDS)("deletes 450 $kind in batches of 200, 200 and 50", async (kind) => {
-  const { bluesky, records, reported, run, stored } = await deletionOf450(kind);
+  const { bluesky, records, reported, run, stored } = await deletionOf(kind);
 
   await expect(run()).resolves.toBeUndefined();
 
@@ -77,7 +77,7 @@ test.each(KINDS)("deletes 450 $kind in batches of 200, 200 and 50", async (kind)
 test.each(KINDS)(
   "rejects after the first batch when the second fails, leaving 250 $kind",
   async (kind) => {
-    const { bluesky, records, reported, run, stored } = await deletionOf450(kind);
+    const { bluesky, records, reported, run, stored } = await deletionOf(kind);
     bluesky.failApplyWrites({ call: 2, status: 500 });
 
     await expect(run()).rejects.toThrow("500");
@@ -122,4 +122,62 @@ test("consumes or cancels every applyWrites response body, on success and on fai
     responses.map((response) => response.bodyUsed),
     "every applyWrites response body is consumed or cancelled",
   ).toStrictEqual([true, true]);
+});
+
+test.each([
+  { count: 0, batches: [] },
+  { count: 200, batches: [200] },
+  { count: 400, batches: [200, 200] },
+])(
+  "deletes $count likes in $batches.length full batches, never an empty one",
+  async ({ count, batches }) => {
+    const { bluesky, reported, run, stored } = await deletionOf(KINDS[0], count);
+
+    await run();
+
+    expect(bluesky.receivedWrites().map((writes) => writes.length)).toStrictEqual(batches);
+    expect(reported.map((batch) => batch.length)).toStrictEqual(batches);
+    expect(stored()).toStrictEqual([]);
+  },
+);
+
+const oneLike = (): LikeRecord => ({
+  uri: `at://${DID}/app.bsky.feed.like/one`,
+  cid: CID,
+  value: {
+    $type: "app.bsky.feed.like",
+    subject: { uri: `at://${DID}/app.bsky.feed.post/one`, cid: CID },
+    createdAt: "2020-01-01T00:00:00.000Z",
+  },
+});
+
+test("sends applyWrites as JSON", async () => {
+  const inits: (RequestInit | undefined)[] = [];
+  const fetchHandler = async (_path: string, init?: RequestInit) => {
+    inits.push(init);
+    return Response.json({ results: [] });
+  };
+
+  await deleteLikes([oneLike()], { did: DID, fetchHandler, onBatchDeleted: () => {} });
+
+  expect(inits.map((init) => new Headers(init?.headers).get("content-type"))).toStrictEqual([
+    "application/json",
+  ]);
+});
+
+test("accepts an applyWrites response without a body", async () => {
+  const reported: LikeRecord[][] = [];
+  const answerWithoutBody = async () => new Response(null, { status: 200 });
+
+  await expect(
+    deleteLikes([oneLike()], {
+      did: DID,
+      fetchHandler: answerWithoutBody,
+      onBatchDeleted: (batch) => {
+        reported.push(batch);
+      },
+    }),
+  ).resolves.toBeUndefined();
+
+  expect(reported).toStrictEqual([[oneLike()]]);
 });

@@ -59,6 +59,7 @@ test.each([
   { problem: "has no accessJwt key", body: { refreshJwt: "leaky-refresh-token", did: DID } },
   { problem: "has a numeric accessJwt", body: { accessJwt: 12345, did: DID } },
   { problem: "has an empty accessJwt", body: { accessJwt: "", did: DID } },
+  { problem: "is null", body: null },
 ])(
   "login rejects a 200 createSession response that $problem, without leaking the password or the body",
   async ({ body }) => {
@@ -74,8 +75,23 @@ test.each([
     expect(failure, "login rejects when the response lacks a string accessJwt").toBeInstanceOf(
       Error,
     );
+    expect((failure as Error).message).toBe("createSession returned no access token");
     expect((failure as Error).message).not.toContain(APP_PASSWORD);
     expect((failure as Error).message).not.toContain("leaky-refresh-token");
     expect((failure as Error).message).not.toContain("12345");
   },
 );
+
+test("sends createSession as JSON", async () => {
+  const inits: (RequestInit | undefined)[] = [];
+  const answerWithToken = async (_input: URL | string, init?: RequestInit) => {
+    inits.push(init);
+    return Response.json({ accessJwt: "fake-access-jwt", did: DID });
+  };
+
+  await login({ baseUrl: BASE_URL, did: DID, password: APP_PASSWORD, fetch: answerWithToken });
+
+  expect(inits.map((init) => new Headers(init?.headers).get("content-type"))).toStrictEqual([
+    "application/json",
+  ]);
+});

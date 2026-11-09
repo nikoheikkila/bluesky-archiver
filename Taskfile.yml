@@ -14,6 +14,21 @@ tasks:
     cmds:
       - bunx vitest run {{.CLI_ARGS}}
 
+  mutation:
+    desc: Full-project mutation run with Stryker (slow; use at the end-of-phase gate)
+    cmds:
+      - bunx stryker run {{.CLI_ARGS}}
+
+  mutation:incremental:
+    desc: Mutation run reusing cached results (--incremental)
+    cmds:
+      - bunx stryker run --incremental {{.CLI_ARGS}}
+
+  mutation:diff:
+    desc: Mutate only production files changed against the base branch (clean tree required)
+    cmds:
+      - bun scripts/stryker-diff.ts {{.CLI_ARGS}}
+
   typecheck:
     desc: Typecheck with tsc
     cmds:
@@ -35,6 +50,7 @@ tasks:
       - task: lint
       - task: typecheck
       - task: test
+      - task: mutation:incremental
 
   dev:
     desc: Run the Worker locally (trigger with GET /cdn-cgi/handler/scheduled; never against the real account)

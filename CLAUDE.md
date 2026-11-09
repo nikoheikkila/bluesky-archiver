@@ -25,6 +25,10 @@ task test -- -t "exactly one year"      # one test by name: task test -- -t "<na
 task typecheck                              # tsc --noEmit
 task lint                                   # Biome format + lint + import order (strict)
 task lint:fix                               # applies Biome fixes
+task check                                  # lint + typecheck + test + incremental mutation tests
+task mutation                               # full Stryker run (slow; end-of-phase gate only)
+task mutation:incremental                   # Stryker reusing reports/stryker-incremental.json
+task mutation:diff [-- <base>]              # mutate only src/ files changed against the base branch (clean tree required)
 task dev                                    # wrangler dev --test-scheduled; trigger with GET /cdn-cgi/handler/scheduled
 bunx wrangler deploy --dry-run --outdir <dir>  # build the bundle without deploying
 task count                                  # live count of likes/reposts older than one year + the run's request budget (public endpoint, read-only)
@@ -53,9 +57,24 @@ the API; for history use Workers Logs in the dashboard (3 days).
 **Warning:** the scheduled handler deletes likes and reposts. Do not trigger it under `task dev` against the
 real account.
 
+### Mutation testing
+
+Stryker (`stryker.config.mjs`, Vitest runner) mutates `src/` except `src/index.ts`, which only binds
+the global `fetch` and `console.log` and cannot be tested without patching a global. The score is 100%
+and `thresholds.break` is 100, so any surviving mutant fails the run, `task check` and CI (the `test`
+job runs `task mutation:incremental` with `reports/stryker-incremental.json` cached, before `deploy`).
+Setup quirks: `tsconfigFile` points at a nonexistent file because TypeScript 7 has no JS API for
+Stryker's tsconfig rewriter, and `ignorePatterns` keeps `.claude`/`.agents` (symlinks) out of the
+sandbox copy. `.stryker-tmp/` and `reports/` are gitignored.
+
+Do not run the mutation harness inside each red-green cycle. Run it when work is ready, then kill
+survivors with behaviour tests. Recheck with a scoped run, not the whole project:
+`bunx stryker run --force --mutate src/<file>.ts[:<start>-<end>]`. Classify a survivor you cannot kill as
+equivalent with a one-line argument rather than forcing a brittle test.
+
 Biome (`biome.json`) formats and lints the code. A Lefthook pre-commit hook (`lefthook.yml`, installed by `bun install` via `prepare`) runs `biome check --write` on staged files.
 
-CI (`.github/workflows/deploy.yml`) runs `task lint`, `task typecheck` and `task test` on every push to `main`, then
+CI (`.github/workflows/deploy.yml`) runs `task lint`, `task typecheck`, `task test` and `task mutation:incremental` on every push to `main`, then
 `wrangler deploy` using the `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` repository secrets.
 
 ## Architecture

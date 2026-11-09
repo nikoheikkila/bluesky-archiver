@@ -86,3 +86,27 @@ test.each([
   );
   expect(searchParams(bluesky, "collection")).toStrictEqual(Array(3).fill(collection));
 });
+
+test("an empty page ends paging even when it carries a cursor", async () => {
+  const listed = Array.from({ length: 3 }, (_, index) => ({ uri: `at://${DID}/like/${index}` }));
+  const pages = [
+    { records: listed, cursor: "c1" },
+    { records: [], cursor: "c2" },
+    { records: [{ uri: `at://${DID}/like/beyond-the-empty-page` }] },
+  ];
+  const requested: URL[] = [];
+  const serveNextPage = async (input: URL | string) => {
+    requested.push(new URL(input));
+    return Response.json(pages[requested.length - 1]);
+  };
+
+  const records = await listRecords({
+    baseUrl: BASE_URL,
+    did: DID,
+    collection: "app.bsky.feed.like",
+    fetch: serveNextPage,
+  });
+
+  expect(records.map((record) => record.uri)).toStrictEqual(listed.map((record) => record.uri));
+  expect(requested.map((url) => url.searchParams.get("cursor"))).toStrictEqual([null, "c1"]);
+});

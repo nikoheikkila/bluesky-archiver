@@ -97,3 +97,30 @@ test.each([
   ]);
   expect(result.skipped).toBe(0);
 });
+
+test.each([
+  { kind: "the number 0", createdAt: 0 },
+  { kind: "the number 2020", createdAt: 2020 },
+  { kind: "an array holding a date", createdAt: ["2020-01-01T00:00:00Z"] },
+  { kind: "true", createdAt: true },
+  { kind: "null", createdAt: null },
+  { kind: "an object", createdAt: {} },
+])("skips and never selects a like whose createdAt is $kind, not a string", ({ createdAt }) => {
+  const runStart = Date.parse("2026-11-08T03:00:00Z");
+  const notAString = likeCreatedAt("i", createdAt as unknown as string);
+
+  const result = selectOldLikes([notAString], runStart);
+
+  expect(result.old).toStrictEqual([]);
+  expect(result.skipped).toBe(1);
+});
+
+test("skips and never selects a like that has no value", () => {
+  const runStart = Date.parse("2026-11-08T03:00:00Z");
+  const { uri, cid } = likeCreatedAt("j", "2020-01-01T00:00:00Z");
+
+  const result = selectOldLikes([{ uri, cid } as unknown as LikeRecord], runStart);
+
+  expect(result.old).toStrictEqual([]);
+  expect(result.skipped).toBe(1);
+});

@@ -33,6 +33,17 @@ jobs:
       - name: Test
         run: task test
 
+      - name: Restore Stryker incremental cache
+        uses: actions/cache@v4
+        with:
+          path: reports/stryker-incremental.json
+          key: stryker-incremental-${{ github.sha }}
+          restore-keys: |
+            stryker-incremental-
+
+      - name: Mutation test
+        run: task mutation:incremental
+
   deploy:
     needs: test
     runs-on: ubuntu-latest
