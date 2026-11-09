@@ -3,12 +3,6 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "vitest run",
-    "typecheck": "tsc --noEmit",
-    "dev": "wrangler dev --test-scheduled",
-    "deploy": "wrangler deploy",
-    "lint": "biome check .",
-    "lint:fix": "biome check --write .",
     "prepare": "lefthook install"
   },
   "devDependencies": {

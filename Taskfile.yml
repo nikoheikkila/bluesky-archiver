@@ -9,6 +9,43 @@ version: "3"
 # support `trap`.
 
 tasks:
+  test:
+    desc: Run the Vitest suite inside workerd (extra args go to vitest, e.g. task test -- test/select.test.ts)
+    cmds:
+      - bunx vitest run {{.CLI_ARGS}}
+
+  typecheck:
+    desc: Typecheck with tsc
+    cmds:
+      - bunx tsc --noEmit
+
+  lint:
+    desc: Check formatting, lint rules and import order with Biome
+    cmds:
+      - bunx biome check .
+
+  lint:fix:
+    desc: Apply Biome fixes
+    cmds:
+      - bunx biome check --write .
+
+  check:
+    desc: Run lint, typecheck and tests (what CI runs before deploying)
+    cmds:
+      - task: lint
+      - task: typecheck
+      - task: test
+
+  dev:
+    desc: Run the Worker locally (trigger with GET /cdn-cgi/handler/scheduled; never against the real account)
+    cmds:
+      - bunx wrangler dev --test-scheduled
+
+  deploy:
+    desc: Deploy the Worker with wrangler
+    cmds:
+      - bunx wrangler deploy
+
   logs:
     desc: Stream the deployed Worker's logs (pretty), reconnecting when the session ends
     cmds:

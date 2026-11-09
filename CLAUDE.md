@@ -12,21 +12,22 @@ and OAuth in place of the app password.
 
 ## Commands
 
-Bun is the package manager and script runner.
+Bun is the package manager; [go-task](https://taskfile.dev) (`brew install go-task`) is the script runner.
+Tasks live in `Taskfile.yml`; `package.json` keeps only the `prepare` lifecycle hook.
 
 ```bash
 bun install
-bun run test                                   # default suite (Vitest inside workerd via @cloudflare/vitest-pool-workers); every test runs against the in-process fake
-bunx vitest run test/select.test.ts            # one file: bunx vitest run test/<file>.test.ts
-bunx vitest run -t "exactly one year"          # one test by name: bunx vitest run -t "<name>"
-bun run typecheck                              # tsc --noEmit
-bun run lint                                   # Biome format + lint + import order (strict)
-bun run lint:fix                               # applies Biome fixes
-bun run dev                                    # wrangler dev --test-scheduled; trigger with GET /cdn-cgi/handler/scheduled
+task test                                      # default suite (Vitest inside workerd via @cloudflare/vitest-pool-workers); every test runs against the in-process fake
+task test -- test/select.test.ts        # one file: task test -- test/<file>.test.ts
+task test -- -t "exactly one year"      # one test by name: task test -- -t "<name>"
+task typecheck                              # tsc --noEmit
+task lint                                   # Biome format + lint + import order (strict)
+task lint:fix                               # applies Biome fixes
+task dev                                    # wrangler dev --test-scheduled; trigger with GET /cdn-cgi/handler/scheduled
 bunx wrangler deploy --dry-run --outdir <dir>  # build the bundle without deploying
 ```
 
-Logs (requires [go-task](https://taskfile.dev), `brew install go-task`, and 1Password CLI; tasks live in `Taskfile.yml`):
+Logs (requires 1Password CLI too):
 
 ```bash
 task logs          # stream the deployed Worker's logs, pretty-printed
@@ -41,12 +42,12 @@ during each reconnect), so leave one running before 03:00 UTC to catch the daily
 (per-Worker Editor and Metadata Read-Only roles) can tail but cannot query historical logs through
 the API; for history use Workers Logs in the dashboard (3 days).
 
-**Warning:** the scheduled handler deletes likes. Do not trigger it under `bun run dev` against the
+**Warning:** the scheduled handler deletes likes. Do not trigger it under `task dev` against the
 real account.
 
 Biome (`biome.json`) formats and lints the code. A Lefthook pre-commit hook (`lefthook.yml`, installed by `bun install` via `prepare`) runs `biome check --write` on staged files.
 
-CI (`.github/workflows/deploy.yml`) runs `bun run check`, typecheck and tests on every push to `main`, then
+CI (`.github/workflows/deploy.yml`) runs `task lint`, `task typecheck` and `task test` on every push to `main`, then
 `wrangler deploy` using the `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` repository secrets.
 
 ## Architecture
