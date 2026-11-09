@@ -6,9 +6,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A Cloudflare Worker (TypeScript, Wrangler) that runs daily at 03:00 UTC against one Bluesky account
 (DID and server URL are Wrangler `vars` in `wrangler.jsonc`). Each run permanently deletes the
-account's likes whose `createdAt` is more than 365 × 24 h before the run start. Deletion is
-permanent, and there is no mode or flag that turns it off. Later slices may add reposts and posts,
-and OAuth in place of the app password.
+account's likes and reposts whose `createdAt` is more than 365 × 24 h before the run start.
+Deletion is permanent, and there is no mode or flag that turns it off. Likes are processed first,
+then reposts, in the same invocation, with one login at most, and only when something is old.
+Reposts are direct `app.bsky.feed.repost` records only. Posts (including quote posts) are not
+touched yet. Later slices may add posts, and OAuth in place of the app password.
 
 ## Commands
 
@@ -42,7 +44,7 @@ during each reconnect), so leave one running before 03:00 UTC to catch the daily
 (per-Worker Editor and Metadata Read-Only roles) can tail but cannot query historical logs through
 the API; for history use Workers Logs in the dashboard (3 days).
 
-**Warning:** the scheduled handler deletes likes. Do not trigger it under `task dev` against the
+**Warning:** the scheduled handler deletes likes and reposts. Do not trigger it under `task dev` against the
 real account.
 
 Biome (`biome.json`) formats and lints the code. A Lefthook pre-commit hook (`lefthook.yml`, installed by `bun install` via `prepare`) runs `biome check --write` on staged files.
@@ -52,28 +54,35 @@ CI (`.github/workflows/deploy.yml`) runs `task lint`, `task typecheck` and `task
 
 ## Architecture
 
-The pipeline is `listRecords (app.bsky.feed.like) → selectOldRecords → login (createSession) → deleteLikes (applyWrites) →
-formatLikeLine / formatDeletionSummary → console.log`, wired in `src/index.ts`. Deletion runs in
-batches of at most 200, oldest first, and one line is logged per deleted like after each batch
-succeeds. Login and deletion are skipped when no like is old enough; any non-OK response throws, so
-the run fails without a summary line.
+The pipeline per kind is `listRecords → selectOldRecords → login (createSession) → deleteRecords
+(applyWrites) → formatRecordLine / formatDeletionSummary → console.log`, wired in `src/index.ts`.
+The kinds run in order: likes (`app.bsky.feed.like`) first, then reposts (`app.bsky.feed.repost`).
+Login happens once, and only when something is old. Deletion runs in batches of at most 200, oldest
+first, and one line is logged per deleted record after each batch succeeds, followed by a summary
+line whose noun is "like" or "repost". Deletion is skipped for a kind when none of its records is
+old enough. Any non-OK response throws, so the run fails without a summary line for that kind, and a
+failed likes request stops the run before any repost request.
 
 - `src/bluesky.ts` — `listRecords({ baseUrl, did, collection })` pages through the public
   `com.atproto.repo.listRecords` endpoint for any collection (`limit=100`) until an empty page or a
   missing cursor. It scans every page, because record order follows record keys, not `createdAt`.
-  `listLikes()` is a thin wrapper over it for `app.bsky.feed.like`.
+  `LIKE_COLLECTION` names the likes collection, and `listLikes()` is a thin wrapper over
+  `listRecords` for it.
 - `src/select.ts` — `selectOldRecords(records, runStart)` holds the one age rule. It keeps records
   whose `createdAt` is strictly more than 365 × 24 h before `runStart`, oldest first. A missing or
   unparseable `createdAt` is counted as skipped and never selected. `selectOldLikes` is a thin
   wrapper over it.
 - `src/session.ts` — `login()` returns `fetchHandler(path, init)`, the atproto `Agent` shape. The
   deletion code depends only on `fetchHandler`, not on a raw token.
-- `src/delete.ts` — `deleteLikes()`: `com.atproto.repo.applyWrites` deletes in batches of at most 200.
-- `src/report.ts` — `formatLikeLine()` and `formatDeletionSummary()`. Wording is fixed by the spec.
-- `src/index.ts` — the only file allowed to use Worker-specific APIs. Run start is
-  `controller.scheduledTime`. It reads the `BLUESKY_APP_PASSWORD` secret and fails before listing
-  when it is missing. Everything else must use only web-standard APIs (`fetch`, `Date`, `console`)
-  so the core can be reused.
+- `src/delete.ts` — `deleteRecords()` batches `com.atproto.repo.applyWrites` deletes, at most 200
+  per call, for any collection, never mixing collections in one call. `deleteLikes()` is a thin
+  wrapper over it.
+- `src/report.ts` — `formatRecordLine()`, `formatLikeLine()` and `formatDeletionSummary()`, whose
+  noun is "like" or "repost". Wording is fixed by the spec.
+- `src/index.ts` — the only file allowed to use Worker-specific APIs; it holds the `scheduled`
+  handler. Run start is `controller.scheduledTime`. It reads the `BLUESKY_APP_PASSWORD` secret and
+  fails before listing when it is missing. Everything else must use only web-standard APIs
+  (`fetch`, `Date`, `console`) so the core can be reused.
 
 ### Tests and the verified fake
 
@@ -106,8 +115,10 @@ the run fails without a summary line.
 
 ## Constraints
 
-- The Worker sends only `GET listRecords`, `POST createSession` and `POST applyWrites` (deletes of
-  `app.bsky.feed.like` records only); it never calls `deleteSession`.
+- The Worker sends only `GET listRecords` (for `app.bsky.feed.like` and `app.bsky.feed.repost`),
+  `POST createSession` and `POST applyWrites`. `applyWrites` carries deletes of `app.bsky.feed.like`
+  and `app.bsky.feed.repost` records only, never one collection mixed with another and never
+  `app.bsky.feed.post`. It never calls `deleteSession`.
 - The age rule is a global invariant and applies to every record kind the Worker deletes. A record
   is older than one year when its own `createdAt` is more than 365 × 24 h before the run starts; the
   run start is `controller.scheduledTime`, and the comparison is in UTC. A record whose subject was
@@ -118,8 +129,8 @@ the run fails without a summary line.
   reference, never the value. The password must never appear in logs, errors, or the repository.
 - Any Cloudflare resource (KV, D1, R2, Durable Objects, and so on) is allowed when its usage stays
   within its free tier. The Workers Free plan allows at most 50 outgoing requests per invocation and
-  has a CPU limit. Workers Logs keeps 3 days on the Free plan; the run's log lines are how the
-  daily found count is checked.
+  has a CPU limit; a run uses about 31 requests at the current backlog. Workers Logs keeps 3 days
+  on the Free plan; the run's log lines are how the daily found count is checked.
 - `compatibility_date` is pinned to the newest date the installed `workerd` accepts; a later date
   fails to start the runtime.
 - The fake and test code must never be bundled, and `@bsky/sdk` and `@atproto/lex` must never be

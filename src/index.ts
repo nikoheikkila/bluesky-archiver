@@ -1,8 +1,10 @@
-import { LIKE_COLLECTION, type LikeRecord, listRecords } from "./bluesky";
+import { type Collection, LIKE_COLLECTION, listRecords, type SubjectRecord } from "./bluesky";
 import { deleteRecords } from "./delete";
-import { formatDeletionSummary, formatLikeLine } from "./report";
+import { formatDeletionSummary, formatRecordLine, type RecordNoun } from "./report";
 import { selectOldRecords } from "./select";
 import { login } from "./session";
+
+const REPOST_COLLECTION: Collection = "app.bsky.feed.repost";
 
 export interface Env {
   BLUESKY_DID: string;
@@ -11,18 +13,25 @@ export interface Env {
   BLUESKY_APP_PASSWORD?: string;
 }
 
-class OldLikesCleaner {
+class OldRecordsCleaner {
   private readonly password: string;
 
   constructor(private readonly env: Env) {
-    this.password = OldLikesCleaner.requirePassword(env);
+    this.password = OldRecordsCleaner.requirePassword(env);
   }
 
+  private session?: Awaited<ReturnType<typeof login>>;
+
   async run(runStart: number): Promise<void> {
-    const likes = await this.fetchLikes();
-    const { old, skipped } = selectOldRecords(likes, runStart);
-    const deleted = await this.deleteOld(old);
-    this.report({ found: old.length, deleted, skipped });
+    await this.clean(LIKE_COLLECTION, "like", runStart);
+    await this.clean(REPOST_COLLECTION, "repost", runStart);
+  }
+
+  private async clean(collection: Collection, noun: RecordNoun, runStart: number): Promise<void> {
+    const records = await this.fetchRecords(collection);
+    const { old, skipped } = selectOldRecords(records, runStart);
+    const deleted = await this.deleteOld(collection, old);
+    this.report({ found: old.length, deleted, skipped }, noun);
   }
 
   private static requirePassword(env: Env): string {
@@ -32,11 +41,11 @@ class OldLikesCleaner {
     return env.BLUESKY_APP_PASSWORD;
   }
 
-  private fetchLikes() {
+  private fetchRecords(collection: Collection) {
     return listRecords({
       baseUrl: this.env.BLUESKY_SERVER_URL,
       did: this.env.BLUESKY_DID,
-      collection: LIKE_COLLECTION,
+      collection,
     });
   }
 
@@ -48,13 +57,16 @@ class OldLikesCleaner {
     });
   }
 
-  private async deleteOld(old: LikeRecord[]): Promise<number> {
+  private async deleteOld(collection: Collection, old: SubjectRecord[]): Promise<number> {
     if (old.length === 0) {
       return 0;
     }
-    const session = await this.login();
+    if (!this.session) {
+      this.session = await this.login();
+    }
+    const session = this.session;
     let deleted = 0;
-    await deleteRecords(LIKE_COLLECTION, old, {
+    await deleteRecords(collection, old, {
       did: this.env.BLUESKY_DID,
       fetchHandler: session.fetchHandler,
       onBatchDeleted: (batch) => {
@@ -64,15 +76,15 @@ class OldLikesCleaner {
     return deleted;
   }
 
-  private logDeleted(batch: LikeRecord[]): number {
-    for (const like of batch) {
-      console.log(formatLikeLine(like));
+  private logDeleted(batch: SubjectRecord[]): number {
+    for (const record of batch) {
+      console.log(formatRecordLine(record));
     }
     return batch.length;
   }
 
-  private report(summary: Parameters<typeof formatDeletionSummary>[0]): void {
-    for (const line of formatDeletionSummary(summary)) {
+  private report(summary: Parameters<typeof formatDeletionSummary>[0], noun: RecordNoun): void {
+    for (const line of formatDeletionSummary(summary, noun)) {
       console.log(line);
     }
   }
@@ -80,6 +92,6 @@ class OldLikesCleaner {
 
 export default {
   async scheduled(controller: ScheduledController, env: Env): Promise<void> {
-    await new OldLikesCleaner(env).run(controller.scheduledTime);
+    await new OldRecordsCleaner(env).run(controller.scheduledTime);
   },
 };

@@ -187,7 +187,8 @@ export function createFakeBluesky(options: FakeBlueskyOptions): FakeBluesky {
               return Response.json(
                 {
                   error: "InvalidRequest",
-                  message: "Only deletes of app.bsky.feed.like are allowed",
+                  message:
+                    "Only deletes of app.bsky.feed.like and app.bsky.feed.repost are allowed",
                 },
                 { status: 400 },
               );

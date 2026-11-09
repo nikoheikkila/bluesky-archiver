@@ -52,6 +52,7 @@ test("Daily run deletes only likes older than one year", async () => {
     `${deletedCreatedAt} ${deleted.uri}`,
     `${footballCreatedAt} ${football.uri}`,
     "Deleted 3 of 3 likes older than one year",
+    "No reposts are older than one year",
   ]);
   expect(bluesky.likes().map((like) => like.subject)).toStrictEqual([cooking.uri, music.uri]);
 });

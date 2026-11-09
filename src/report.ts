@@ -6,9 +6,9 @@ export interface DeletionSummary {
   skipped: number;
 }
 
-type Noun = "like" | "repost";
+export type RecordNoun = "like" | "repost";
 
-function plural(count: number, noun: Noun): string {
+function plural(count: number, noun: RecordNoun): string {
   return count === 1 ? noun : `${noun}s`;
 }
 
@@ -20,7 +20,7 @@ export const formatLikeLine = formatRecordLine;
 
 export function formatDeletionSummary(
   { found, deleted, skipped }: DeletionSummary,
-  noun: Noun = "like",
+  noun: RecordNoun = "like",
 ): string[] {
   const lines: string[] = [];
   if (skipped > 0) {
