@@ -20,8 +20,9 @@ checklist records what that slice needed, in the order that kept every chunk saf
 
 ## 2. Fake and contract first (the riskiest cycle)
 
-- `test/fake-bluesky.ts`: store the kind, add storage-only harness methods (`add<Kind>()`,
-  `<kind>s()`) in the acceptance step so the acceptance test compiles, then serve it through
+- `test/fake-bluesky.ts`: store the kind, add storage-only harness methods (`add<Kind>()`, the
+  bulk `add<Kind>s()` for seeding without loops, and `<kind>s()`) in the acceptance step so the
+  acceptance test compiles, then serve it through
   `listRecords` with the same paging as likes (a cursor on every non-empty page, then an empty page
   without one), and accept its deletes in `applyWrites`.
 - Validate every served record against its record lexicon from `@bsky/sdk`, keeping the

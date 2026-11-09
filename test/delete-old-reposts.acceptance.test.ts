@@ -1,18 +1,14 @@
 // Feature: feature/delete-old-reposts.feature
 // Scenario: Daily run deletes only reposts older than one year
 import { createScheduledController, env } from "cloudflare:test";
-import { afterEach, expect, test, vi } from "vitest";
-import worker from "../src/index";
+import { expect, test } from "vitest";
+import { createWorker } from "../src/worker";
 import { createFakeBluesky } from "./fake-bluesky";
 
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
 const YEAR = 365 * DAY;
 const APP_PASSWORD = "test-app-password";
-
-afterEach(() => {
-  vi.restoreAllMocks();
-});
 
 test("Daily run deletes only reposts older than one year", async () => {
   const runStart = Date.parse("2026-11-08T03:00:00Z");
@@ -40,14 +36,19 @@ test("Daily run deletes only reposts older than one year", async () => {
   bluesky.deletePost(deleted);
   expect(bluesky.posts().map((post) => post.uri)).not.toContain(deleted.uri);
   expect(bluesky.reposts().map((repost) => repost.subject)).toContain(deleted.uri);
-  bluesky.intercept();
-  const log = vi.spyOn(console, "log").mockImplementation(() => {});
+  const lines: string[] = [];
+  const worker = createWorker({
+    fetch: bluesky.fetch,
+    log: (line) => {
+      lines.push(line);
+    },
+  });
   const workerEnv = { ...env, BLUESKY_APP_PASSWORD: APP_PASSWORD };
 
   const controller = createScheduledController({ scheduledTime: runStart });
   await worker.scheduled(controller, workerEnv);
 
-  expect(log.mock.calls.map((args) => args.join(" "))).toStrictEqual([
+  expect(lines).toStrictEqual([
     "No likes are older than one year",
     `${electionsCreatedAt} ${elections.uri}`,
     `${deletedCreatedAt} ${deleted.uri}`,

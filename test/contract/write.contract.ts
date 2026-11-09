@@ -1,6 +1,7 @@
 // Shared contract for com.atproto.server.createSession and com.atproto.repo.applyWrites
 // (deletes of app.bsky.feed.like and app.bsky.feed.repost). Holds for the fake; the default suite never sends it to the real server.
 import { expect } from "vitest";
+import type { Fetch } from "../../src/bluesky";
 import { walkListRecords } from "./list-records.contract";
 
 export interface WriteTarget {
@@ -9,6 +10,7 @@ export interface WriteTarget {
   appPassword: string;
   /** URIs of exactly three records of `collection`, in this order. */
   likeUris: [string, string, string];
+  fetch: Fetch;
   /** Defaults to app.bsky.feed.like. */
   collection?: "app.bsky.feed.like" | "app.bsky.feed.repost";
 }
@@ -31,11 +33,14 @@ function deleteWrite(rkey: string, collection = "app.bsky.feed.like") {
 }
 
 async function createSession(target: WriteTarget): Promise<SessionResponse> {
-  const response = await fetch(new URL("/xrpc/com.atproto.server.createSession", target.baseUrl), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ identifier: target.did, password: target.appPassword }),
-  });
+  const response = await target.fetch(
+    new URL("/xrpc/com.atproto.server.createSession", target.baseUrl),
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ identifier: target.did, password: target.appPassword }),
+    },
+  );
   expect(response.status, "createSession with the DID and the right password status").toBe(200);
   const session = (await response.json()) as SessionResponse;
   expect(typeof session.accessJwt, "createSession returns an access token").toBe("string");
@@ -60,7 +65,7 @@ async function postWrites(
   writes: object[],
   accessJwt?: string,
 ): Promise<Response> {
-  return fetch(new URL("/xrpc/com.atproto.repo.applyWrites", target.baseUrl), {
+  return target.fetch(new URL("/xrpc/com.atproto.repo.applyWrites", target.baseUrl), {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -76,6 +81,7 @@ async function remainingLikeUris(target: WriteTarget): Promise<string[]> {
     did: target.did,
     limit: 100,
     collection: target.collection,
+    fetch: target.fetch,
   });
   return pages.flat().map((record) => record.uri);
 }
@@ -113,53 +119,64 @@ export async function walkWrites(target: WriteTarget): Promise<{ afterDelete: st
 
 // Writes that are valid under the applyWrites lexicon but break the rule that applyWrites carries only
 // deletes of app.bsky.feed.like. Each one travels together with a valid like delete.
-export async function walkRejectedWrites(target: WriteTarget): Promise<void> {
-  const [first, second] = target.likeUris;
-  const likeValue = {
+export interface ForbiddenWrite {
+  name: string;
+  write(target: WriteTarget): object;
+}
+
+const LIKE_CID = "bafyreie5737gdxlw5i64vzichcalba3z2v5n6icifvx5xytvske7mr3hpm";
+
+function likeValue(target: WriteTarget) {
+  return {
     $type: "app.bsky.feed.like",
-    subject: { uri: second, cid: "bafyreie5737gdxlw5i64vzichcalba3z2v5n6icifvx5xytvske7mr3hpm" },
+    subject: { uri: target.likeUris[1], cid: LIKE_CID },
     createdAt: "2025-01-01T00:00:00.000Z",
   };
-  const forbidden: [string, object][] = [
-    [
-      "a create of app.bsky.feed.like",
-      {
-        $type: "com.atproto.repo.applyWrites#create",
-        collection: "app.bsky.feed.like",
-        value: likeValue,
-      },
-    ],
-    [
-      "an update of app.bsky.feed.like",
-      {
-        $type: "com.atproto.repo.applyWrites#update",
-        collection: "app.bsky.feed.like",
-        rkey: rkeyOf(second),
-        value: likeValue,
-      },
-    ],
-    [
-      "a delete in app.bsky.feed.post",
-      {
-        $type: "com.atproto.repo.applyWrites#delete",
-        collection: "app.bsky.feed.post",
-        rkey: rkeyOf(second),
-      },
-    ],
-  ];
+}
 
+export const FORBIDDEN_WRITES: ForbiddenWrite[] = [
+  {
+    name: "a create of app.bsky.feed.like",
+    write: (target) => ({
+      $type: "com.atproto.repo.applyWrites#create",
+      collection: "app.bsky.feed.like",
+      value: likeValue(target),
+    }),
+  },
+  {
+    name: "an update of app.bsky.feed.like",
+    write: (target) => ({
+      $type: "com.atproto.repo.applyWrites#update",
+      collection: "app.bsky.feed.like",
+      rkey: rkeyOf(target.likeUris[1]),
+      value: likeValue(target),
+    }),
+  },
+  {
+    name: "a delete in app.bsky.feed.post",
+    write: (target) => ({
+      $type: "com.atproto.repo.applyWrites#delete",
+      collection: "app.bsky.feed.post",
+      rkey: rkeyOf(target.likeUris[1]),
+    }),
+  },
+];
+
+export async function walkRejectedWrite(
+  target: WriteTarget,
+  forbidden: ForbiddenWrite,
+): Promise<void> {
   const session = await createSession(target);
 
-  for (const [name, write] of forbidden) {
-    const response = await postWrites(
-      target,
-      [deleteWrite(rkeyOf(first)), write],
-      session.accessJwt,
-    );
-    expect(response.status, `applyWrites carrying ${name} status`).toBe(400);
-    expect(
-      await remainingLikeUris(target),
-      `nothing is applied when the request carries ${name}`,
-    ).toStrictEqual(target.likeUris);
-  }
+  const response = await postWrites(
+    target,
+    [deleteWrite(rkeyOf(target.likeUris[0])), forbidden.write(target)],
+    session.accessJwt,
+  );
+
+  expect(response.status, `applyWrites carrying ${forbidden.name} status`).toBe(400);
+  expect(
+    await remainingLikeUris(target),
+    `nothing is applied when the request carries ${forbidden.name}`,
+  ).toStrictEqual(target.likeUris);
 }

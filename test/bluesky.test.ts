@@ -1,99 +1,88 @@
 // Feature: feature/delete-old-likes.feature
 // Cycles 2-3: list every like across all pages; fail loudly when a request fails.
-import { afterEach, expect, test, vi } from "vitest";
+import { expect, test } from "vitest";
 import { listLikes, listRecords } from "../src/bluesky";
-import { createFakeBluesky } from "./fake-bluesky";
+import { createFakeBluesky, type FakeBluesky } from "./fake-bluesky";
 
 const DID = "did:plc:fakeaccount000000000000";
 const OTHER_DID = "did:plc:someoneelse0000000000000";
 const BASE_URL = "https://fake-bluesky.test";
+const CREATED_AT = "2025-01-01T00:00:00.000Z";
 
-afterEach(() => {
-  vi.restoreAllMocks();
-});
-
-test.each([
-  { name: "lists 250 likes in 4 requests", likeCount: 250, requestCount: 4 },
-  { name: "lists 3300 likes in 34 requests", likeCount: 3300, requestCount: 34 },
-])("$name", async ({ likeCount, requestCount }) => {
+function blueskyWithLikes(count: number) {
   const bluesky = createFakeBluesky({ did: DID, baseUrl: BASE_URL });
   const post = bluesky.addPost("a post");
-  const likes = Array.from({ length: likeCount }, () =>
-    bluesky.addLike({ subject: post.uri, createdAt: "2025-01-01T00:00:00.000Z" }),
-  );
-  bluesky.intercept();
+  const likes = bluesky.addLikes(Array(count).fill({ subject: post.uri, createdAt: CREATED_AT }));
+  return { bluesky, likes };
+}
 
-  const records = await listLikes({ baseUrl: BASE_URL, did: DID });
+const searchParams = (bluesky: FakeBluesky, name: string) =>
+  bluesky.requests().map(({ url }) => new URL(url).searchParams.get(name));
+
+test.each([
+  { likeCount: 250, requestCount: 4 },
+  { likeCount: 3300, requestCount: 34 },
+])("lists $likeCount likes in $requestCount requests", async ({ likeCount, requestCount }) => {
+  const { bluesky, likes } = blueskyWithLikes(likeCount);
+
+  const records = await listLikes({ baseUrl: BASE_URL, did: DID, fetch: bluesky.fetch });
 
   expect(records).toHaveLength(likeCount);
   expect(records.map((record) => record.uri).sort()).toStrictEqual(
     likes.map((like) => like.uri).sort(),
   );
-  expect(bluesky.requests()).toHaveLength(requestCount);
   expect(
     bluesky.requests().map(({ method, url }) => [method, new URL(url).pathname]),
   ).toStrictEqual(Array(requestCount).fill(["GET", "/xrpc/com.atproto.repo.listRecords"]));
 });
 
 test("asks the server only for the configured account's likes", async () => {
-  const bluesky = createFakeBluesky({ did: DID, baseUrl: BASE_URL });
-  const post = bluesky.addPost("a post");
-  for (let i = 0; i < 3; i++) {
-    bluesky.addLike({ subject: post.uri, createdAt: "2025-01-01T00:00:00.000Z" });
-  }
-  bluesky.intercept();
+  const { bluesky } = blueskyWithLikes(3);
 
-  const records = await listLikes({ baseUrl: BASE_URL, did: DID });
+  const records = await listLikes({ baseUrl: BASE_URL, did: DID, fetch: bluesky.fetch });
 
   expect(records).toHaveLength(3);
-  for (const { url } of bluesky.requests()) {
-    const params = new URL(url).searchParams;
-    expect(params.get("repo")).toBe(DID);
-    expect(params.get("collection")).toBe("app.bsky.feed.like");
-  }
+  expect(searchParams(bluesky, "repo")).toStrictEqual([DID, DID]);
+  expect(searchParams(bluesky, "collection")).toStrictEqual([
+    "app.bsky.feed.like",
+    "app.bsky.feed.like",
+  ]);
+});
 
-  const error = await listLikes({ baseUrl: BASE_URL, did: OTHER_DID }).catch((e: unknown) => e);
+test("fails naming the request and HTTP 400 when asked for another account's likes", async () => {
+  const { bluesky } = blueskyWithLikes(3);
 
-  expect(error).toBeInstanceOf(Error);
-  expect((error as Error).message).toContain("com.atproto.repo.listRecords");
-  expect((error as Error).message).toContain("400");
+  await expect(
+    listLikes({ baseUrl: BASE_URL, did: OTHER_DID, fetch: bluesky.fetch }),
+  ).rejects.toThrow(/com\.atproto\.repo\.listRecords.*400/);
 });
 
 test("fails loudly naming the request when the server answers a page with an error", async () => {
-  const bluesky = createFakeBluesky({ did: DID, baseUrl: BASE_URL });
-  const post = bluesky.addPost("a post");
-  for (let i = 0; i < 250; i++) {
-    bluesky.addLike({ subject: post.uri, createdAt: "2025-01-01T00:00:00.000Z" });
-  }
+  const { bluesky } = blueskyWithLikes(250);
   bluesky.failPage({ cursor: "100", status: 500 });
-  bluesky.intercept();
 
-  const error = await listLikes({ baseUrl: BASE_URL, did: DID }).catch((e: unknown) => e);
-
-  expect(error).toBeInstanceOf(Error);
-  expect((error as Error).message).toContain("com.atproto.repo.listRecords");
-  expect((error as Error).message).toContain("500");
+  await expect(listLikes({ baseUrl: BASE_URL, did: DID, fetch: bluesky.fetch })).rejects.toThrow(
+    /com\.atproto\.repo\.listRecords.*500/,
+  );
 });
 
 test.each([
-  { kind: "likes", collection: "app.bsky.feed.like", add: "addLike" },
-  { kind: "reposts", collection: "app.bsky.feed.repost", add: "addRepost" },
+  { kind: "likes", collection: "app.bsky.feed.like", add: "addLikes" },
+  { kind: "reposts", collection: "app.bsky.feed.repost", add: "addReposts" },
 ] as const)("lists 150 $kind in 3 requests", async ({ collection, add }) => {
   const bluesky = createFakeBluesky({ did: DID, baseUrl: BASE_URL });
   const post = bluesky.addPost("a post");
-  const created = Array.from({ length: 150 }, () =>
-    bluesky[add]({ subject: post.uri, createdAt: "2025-01-01T00:00:00.000Z" }),
-  );
-  bluesky.intercept();
+  const created = bluesky[add](Array(150).fill({ subject: post.uri, createdAt: CREATED_AT }));
 
-  const records = await listRecords({ baseUrl: BASE_URL, did: DID, collection });
+  const records = await listRecords({
+    baseUrl: BASE_URL,
+    did: DID,
+    collection,
+    fetch: bluesky.fetch,
+  });
 
-  expect(records).toHaveLength(150);
   expect(records.map((record) => record.uri).sort()).toStrictEqual(
     created.map((record) => record.uri).sort(),
   );
-  expect(bluesky.requests()).toHaveLength(3);
-  for (const { url } of bluesky.requests()) {
-    expect(new URL(url).searchParams.get("collection")).toBe(collection);
-  }
+  expect(searchParams(bluesky, "collection")).toStrictEqual(Array(3).fill(collection));
 });

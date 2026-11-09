@@ -61,7 +61,8 @@ CI (`.github/workflows/deploy.yml`) runs `task lint`, `task typecheck` and `task
 ## Architecture
 
 The pipeline per kind is `listRecords → selectOldRecords → login (createSession) → deleteRecords
-(applyWrites) → formatRecordLine / formatDeletionSummary → console.log`, wired in `src/index.ts`.
+(applyWrites) → formatRecordLine / formatDeletionSummary → log`, built by `createWorker()` in
+`src/worker.ts` and bound to the real `fetch` and `console.log` in `src/index.ts`.
 The kinds run in order: likes (`app.bsky.feed.like`) first, then reposts (`app.bsky.feed.repost`).
 Login happens once, and only when something is old. Deletion runs in batches of at most 200, oldest
 first, and one line is logged per deleted record after each batch succeeds, followed by a summary
@@ -69,33 +70,43 @@ line whose noun is "like" or "repost". Deletion is skipped for a kind when none 
 old enough. Any non-OK response throws, so the run fails without a summary line for that kind, and a
 failed likes request stops the run before any repost request.
 
-- `src/bluesky.ts` — `listRecords({ baseUrl, did, collection })` pages through the public
+- `src/bluesky.ts` — `listRecords({ baseUrl, did, collection, fetch })` pages through the public
   `com.atproto.repo.listRecords` endpoint for any collection (`limit=100`) until an empty page or a
   missing cursor. It scans every page, because record order follows record keys, not `createdAt`.
   `LIKE_COLLECTION` names the likes collection, and `listLikes()` is a thin wrapper over
-  `listRecords` for it.
+  `listRecords` for it. It also exports the `Fetch` type every request goes through.
 - `src/select.ts` — `selectOldRecords(records, runStart)` holds the one age rule. It keeps records
   whose `createdAt` is strictly more than 365 × 24 h before `runStart`, oldest first. A missing or
   unparseable `createdAt` is counted as skipped and never selected. `selectOldLikes` is a thin
   wrapper over it.
-- `src/session.ts` — `login()` returns `fetchHandler(path, init)`, the atproto `Agent` shape. The
-  deletion code depends only on `fetchHandler`, not on a raw token.
+- `src/session.ts` — `login({ baseUrl, did, password, fetch })` returns `fetchHandler(path, init)`,
+  the atproto `Agent` shape. The deletion code depends only on `fetchHandler`, not on a raw token.
 - `src/delete.ts` — `deleteRecords()` batches `com.atproto.repo.applyWrites` deletes, at most 200
   per call, for any collection, never mixing collections in one call. `deleteLikes()` is a thin
   wrapper over it.
 - `src/report.ts` — `formatRecordLine()`, `formatLikeLine()` and `formatDeletionSummary()`, whose
   noun is "like" or "repost". Wording is fixed by the spec.
-- `src/index.ts` — the only file allowed to use Worker-specific APIs; it holds the `scheduled`
-  handler. Run start is `controller.scheduledTime`. It reads the `BLUESKY_APP_PASSWORD` secret and
-  fails before listing when it is missing. Everything else must use only web-standard APIs
-  (`fetch`, `Date`, `console`) so the core can be reused.
+- `src/worker.ts` — `createWorker({ fetch, log })` returns the handlers object with `scheduled`.
+  Run start is `controller.scheduledTime`. It reads the `BLUESKY_APP_PASSWORD` secret and fails
+  before listing when it is missing. Every request goes through the injected `fetch` and every
+  report line through the injected `log`, which is how tests run it against the fake.
+- `src/index.ts` — the only file allowed to use Worker-specific APIs, and the only place bound to
+  the real network and log: `export default createWorker({ fetch: (input, init) => fetch(input,
+  init), log: (line) => console.log(line) })`. The arrow keeps `fetch` called on the global (workerd
+  rejects a detached `fetch` with "Illegal invocation"). Keep named runtime exports out of the main
+  module. Everything else must use only web-standard APIs (`fetch`, `Date`, `console`) so the core
+  can be reused.
 
 ### Tests and the verified fake
 
-- Every test runs against `test/fake-bluesky.ts`, an in-process fake that replaces global `fetch` via
-  `vi.spyOn` (`fetchMock` isn't available in this pool version). It rejects any other origin, so the
-  default suite never reaches the network. It serves `createSession`, `listRecords` and
-  `applyWrites`, and offers failure injection (`failPage` per cursor, `failApplyWrites` per call).
+- Every test runs against `test/fake-bluesky.ts`, an in-process fake. Tests pass its `fetch`
+  (`bluesky.fetch`) to the code under test; nothing patches the global `fetch`, and the `fetch`
+  parameters in `src/` are required, so a test that forgets the fake fails typecheck. It rejects any
+  other origin, so the default suite never reaches the network. It serves `createSession`,
+  `listRecords` and `applyWrites`, and offers failure injection (`failPage` per cursor,
+  `failApplyWrites` per call). `receivedWrites()` returns the writes of every authorised
+  `applyWrites` call in order, refused ones included. `addLikes()` and `addReposts()` seed many
+  records in one call.
   `listRecords` serves `app.bsky.feed.like` and `app.bsky.feed.repost`. `applyWrites` accepts
   deletes of those two collections only, at most 200 per call; it rejects anything else, including
   deletes of `app.bsky.feed.post`, with HTTP 400 and deletes nothing in that case. The fake also
@@ -116,8 +127,13 @@ failed likes request stops the run before any repost request.
   fake only together with its contract.
 - Tests fix the run start explicitly so they pass at any wall-clock time.
 - `test/delete-old-likes.acceptance.test.ts` and `test/delete-old-reposts.acceptance.test.ts` drive
-  the Worker's `scheduled` entry point for the scenarios in `feature/delete-old-likes.feature` and
+  the Worker's `scheduled` entry point, built by `createWorker` with the fake's `fetch` and a log
+  collector, for the scenarios in `feature/delete-old-likes.feature` and
   `feature/delete-old-reposts.feature`.
+- `vitest.config.mts` runs every file in one workerd runtime (`maxWorkers: 1`, `isolate: false`) and
+  pre-bundles `@bsky/sdk/lexicons` with the dep optimizer. That cut the suite from ~4 s to ~0.75 s,
+  because isolated files each started a runtime and re-imported the lexicons. Sharing is safe only
+  while no test patches a global. `experimental.fsModuleCache` does not work under workerd.
 - `test/env.d.ts` augments the global `Cloudflare.Env` with the Worker's `Env` for typing in tests.
 
 ## Constraints

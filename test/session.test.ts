@@ -1,5 +1,5 @@
 // Feature: feature/delete-old-likes.feature (Test Cases 10 and 12, login half)
-import { afterEach, expect, test, vi } from "vitest";
+import { expect, test } from "vitest";
 import { login } from "../src/session";
 import { createFakeBluesky } from "./fake-bluesky";
 
@@ -8,54 +8,74 @@ const BASE_URL = "https://fake-bluesky.test";
 const APP_PASSWORD = "fake-app-password";
 const WRONG_PASSWORD = "wrong-app-password";
 
-afterEach(() => {
-  vi.restoreAllMocks();
+function newBluesky() {
+  return createFakeBluesky({ did: DID, baseUrl: BASE_URL, appPassword: APP_PASSWORD });
+}
+
+test("login with the right password sends one createSession", async () => {
+  const bluesky = newBluesky();
+
+  await login({ baseUrl: BASE_URL, did: DID, password: APP_PASSWORD, fetch: bluesky.fetch });
+
+  expect(
+    bluesky.requests().map(({ method, url }) => [method, new URL(url).pathname]),
+  ).toStrictEqual([["POST", "/xrpc/com.atproto.server.createSession"]]);
 });
 
-test("login with the right password sends one createSession and authorises the handler, with the wrong password it rejects without leaking the password", async () => {
-  const bluesky = createFakeBluesky({ did: DID, baseUrl: BASE_URL, appPassword: APP_PASSWORD });
-  bluesky.intercept();
+test("the session's fetchHandler is authorised for applyWrites", async () => {
+  const bluesky = newBluesky();
+  const session = await login({
+    baseUrl: BASE_URL,
+    did: DID,
+    password: APP_PASSWORD,
+    fetch: bluesky.fetch,
+  });
 
-  const session = await login({ baseUrl: BASE_URL, did: DID, password: APP_PASSWORD });
-
-  const loginPaths = bluesky.requests().map(({ method, url }) => [method, new URL(url).pathname]);
-  expect(loginPaths).toStrictEqual([["POST", "/xrpc/com.atproto.server.createSession"]]);
-
-  const authorised = await session.fetchHandler("/xrpc/com.atproto.repo.applyWrites", {
+  const response = await session.fetchHandler("/xrpc/com.atproto.repo.applyWrites", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ repo: DID, writes: [] }),
   });
-  expect(authorised.status).toBe(200);
 
-  const failure = await login({ baseUrl: BASE_URL, did: DID, password: WRONG_PASSWORD }).then(
-    () => undefined,
-    (error: unknown) => error as Error,
-  );
+  expect(response.status).toBe(200);
+});
+
+test("login with the wrong password rejects with HTTP 401 without leaking the password", async () => {
+  const bluesky = newBluesky();
+
+  const failure = await login({
+    baseUrl: BASE_URL,
+    did: DID,
+    password: WRONG_PASSWORD,
+    fetch: bluesky.fetch,
+  }).catch((error: unknown) => error);
+
   expect(failure, "login with the wrong password rejects").toBeInstanceOf(Error);
-  expect(failure?.message).toContain("401");
-  expect(failure?.message).not.toContain(WRONG_PASSWORD);
+  expect((failure as Error).message).toContain("401");
+  expect((failure as Error).message).not.toContain(WRONG_PASSWORD);
 });
 
 test.each([
-  ["has no accessJwt key", { refreshJwt: "leaky-refresh-token", did: DID }],
-  ["has a numeric accessJwt", { accessJwt: 12345, did: DID }],
-  ["has an empty accessJwt", { accessJwt: "", did: DID }],
+  { problem: "has no accessJwt key", body: { refreshJwt: "leaky-refresh-token", did: DID } },
+  { problem: "has a numeric accessJwt", body: { accessJwt: 12345, did: DID } },
+  { problem: "has an empty accessJwt", body: { accessJwt: "", did: DID } },
 ])(
-  "login rejects a 200 createSession response that %s, without leaking the password or the body",
-  async (_name, body) => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json(body));
+  "login rejects a 200 createSession response that $problem, without leaking the password or the body",
+  async ({ body }) => {
+    const answerWithBody = async () => Response.json(body);
 
-    const failure = await login({ baseUrl: BASE_URL, did: DID, password: APP_PASSWORD }).then(
-      () => undefined,
-      (error: unknown) => error as Error,
-    );
+    const failure = await login({
+      baseUrl: BASE_URL,
+      did: DID,
+      password: APP_PASSWORD,
+      fetch: answerWithBody,
+    }).catch((error: unknown) => error);
 
     expect(failure, "login rejects when the response lacks a string accessJwt").toBeInstanceOf(
       Error,
     );
-    expect(failure?.message).not.toContain(APP_PASSWORD);
-    expect(failure?.message).not.toContain("leaky-refresh-token");
-    expect(failure?.message).not.toContain("12345");
+    expect((failure as Error).message).not.toContain(APP_PASSWORD);
+    expect((failure as Error).message).not.toContain("leaky-refresh-token");
+    expect((failure as Error).message).not.toContain("12345");
   },
 );

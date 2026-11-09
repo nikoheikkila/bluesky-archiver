@@ -4,6 +4,21 @@ Pitfalls and working rules learned in earlier sessions. `CLAUDE.md` holds the ar
 commands and constraints; this file holds what was not obvious from them. Adding a new record kind
 (posts are next) has its own checklist in `.claude/skills/add-record-kind/SKILL.md`.
 
+## Test style
+
+- No `vi.mock`, `vi.spyOn`, `vi.fn` or `vi.mocked`. The code under test takes its I/O as
+  parameters: pass `bluesky.fetch` from the fake, a hand-written stub such as
+  `async () => Response.json(body)`, or `log: (line) => { lines.push(line); }` and assert on
+  `lines`. A second run gets a second `createWorker` with fresh `lines` over the same fake.
+- No `for`, `while`, `forEach` or `if`/`else` in tests. Use `test.each` for cases and a separate
+  test for each branch. Assert over arrays with one matcher, for example
+  `toStrictEqual(Array(n).fill(x))`. Seed with `addLikes(Array(n).fill(like))` or
+  `addLikes(createdAts.map(...))`, not with a loop.
+- The one exception is the paging loop in `test/contract/list-records.contract.ts`: how many pages
+  exist is what the walk finds out. It only collects pages, and every assertion runs after it.
+- The suite shares one workerd runtime (`isolate: false`). A test that patched a global would leak
+  into every later file, which is one more reason for injection over spies.
+
 ## Tests that pin the whole run
 
 - Both acceptance tests and most of `test/scheduled.test.ts` assert the complete log
@@ -20,8 +35,8 @@ commands and constraints; this file holds what was not obvious from them. Adding
 - Before tightening a check in `test/fake-bluesky.ts`, grep for fixtures that are invalid on
   purpose: `grep -rn 'not-a-date\|createdAt: ""' test/`. Undatable likes and reposts must stay
   servable, because the age rule never deletes them and tests prove it.
-- The harness types of `addLike()` and `addRepost()` require `createdAt`. Tests add a record
-  without one through a cast (`{ subject } as unknown as NewRepost`), as in
+- The harness types `NewLike` and `NewRepost` (exported by the fake) require `createdAt`. Tests add
+  a record without one through a cast (`{ subject } as unknown as NewRepost`), as in
   `test/contract/fake.test.ts`.
 - A served record must omit a missing `createdAt`, not carry `createdAt: undefined`; the fake's own
   response validation rejects the latter.

@@ -1,28 +1,40 @@
 import { app, com } from "@bsky/sdk/lexicons";
-import { vi } from "vitest";
 
 const CID = "bafyreie5737gdxlw5i64vzichcalba3z2v5n6icifvx5xytvske7mr3hpm";
 const ACCESS_JWT = "fake-access-jwt";
 const MAX_WRITES = 200;
 
-// In-process fake of com.atproto.repo.listRecords. It replaces global fetch so
-// the suite never reaches the network and rejects any other origin.
+// In-process fake of the Bluesky server. Code under test receives its `fetch` instead of the
+// global one, so the suite never reaches the network; it rejects any other origin.
 
 export interface FakePost {
   uri: string;
 }
 
-export interface FakeLike {
-  uri: string;
+export interface NewLike {
   subject: string;
   createdAt: string;
 }
 
-export interface FakeRepost {
+export interface FakeLike extends NewLike {
   uri: string;
+}
+
+export interface NewRepost {
   subject: string;
   createdAt: string;
   via?: string;
+}
+
+export interface FakeRepost extends NewRepost {
+  uri: string;
+}
+
+/** One write of an applyWrites call, as the fake received it. */
+export interface FakeWrite {
+  $type: string;
+  collection: string;
+  rkey?: string;
 }
 
 export interface FakeQuotePost {
@@ -40,17 +52,24 @@ export interface FakeBlueskyOptions {
 export interface FakeBluesky {
   addPost(text: string): FakePost;
   deletePost(post: FakePost): void;
-  addLike(like: { subject: string; createdAt: string }): FakeLike;
+  addLike(like: NewLike): FakeLike;
+  /** Adds the likes in order, as consecutive addLike calls would. */
+  addLikes(likes: NewLike[]): FakeLike[];
   likes(): FakeLike[];
-  addRepost(repost: { subject: string; createdAt: string; via?: string }): FakeRepost;
+  addRepost(repost: NewRepost): FakeRepost;
+  /** Adds the reposts in order, as consecutive addRepost calls would. */
+  addReposts(reposts: NewRepost[]): FakeRepost[];
   addQuotePost(quote: { quoted: string; createdAt: string }): FakeQuotePost;
   quotePosts(): FakeQuotePost[];
   reposts(): FakeRepost[];
   posts(): FakePost[];
   failPage(failure: { cursor: string; status: number }): void;
   failApplyWrites(failure: { call: number; status: number }): void;
-  intercept(): void;
+  /** The fake server's endpoint; pass it wherever the code under test takes a `fetch`. */
+  fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
   requests(): { method: string; url: string }[];
+  /** The writes of every authorised applyWrites call, in order, including refused calls. */
+  receivedWrites(): FakeWrite[][];
 }
 
 export function createFakeBluesky(options: FakeBlueskyOptions): FakeBluesky {
@@ -60,6 +79,7 @@ export function createFakeBluesky(options: FakeBlueskyOptions): FakeBluesky {
   const storedPosts: FakePost[] = [];
   const storedQuotes: FakeQuotePost[] = [];
   const served: { method: string; url: string }[] = [];
+  const received: FakeWrite[][] = [];
   const failures = new Map<string, number>();
   const writeFailures = new Map<number, number>();
   let applyWritesCalls = 0;
@@ -74,6 +94,25 @@ export function createFakeBluesky(options: FakeBlueskyOptions): FakeBluesky {
   const nextUri = (collection: string) => {
     counter++;
     return `at://${options.did}/${collection}/${counter}`;
+  };
+  const addLike = (like: NewLike): FakeLike => {
+    const created = {
+      uri: nextUri("app.bsky.feed.like"),
+      subject: like.subject,
+      createdAt: like.createdAt,
+    };
+    stored.push(created);
+    return created;
+  };
+  const addRepost = (repost: NewRepost): FakeRepost => {
+    const created = {
+      uri: nextUri("app.bsky.feed.repost"),
+      subject: repost.subject,
+      createdAt: repost.createdAt,
+      ...(repost.via === undefined ? {} : { via: repost.via }),
+    };
+    storedReposts.push(created);
+    return created;
   };
   return {
     failApplyWrites: ({ call, status }) => {
@@ -90,26 +129,11 @@ export function createFakeBluesky(options: FakeBlueskyOptions): FakeBluesky {
     deletePost: (post) => {
       removeByUri(storedPosts, post.uri);
     },
-    addLike: (like) => {
-      const created = {
-        uri: nextUri("app.bsky.feed.like"),
-        subject: like.subject,
-        createdAt: like.createdAt,
-      };
-      stored.push(created);
-      return created;
-    },
+    addLike,
+    addLikes: (likes) => likes.map(addLike),
     likes: () => stored,
-    addRepost: (repost) => {
-      const created = {
-        uri: nextUri("app.bsky.feed.repost"),
-        subject: repost.subject,
-        createdAt: repost.createdAt,
-        ...(repost.via === undefined ? {} : { via: repost.via }),
-      };
-      storedReposts.push(created);
-      return created;
-    },
+    addRepost,
+    addReposts: (reposts) => reposts.map(addRepost),
     reposts: () => storedReposts,
     addQuotePost: (quote) => {
       app.bsky.feed.post.$assert({
@@ -128,117 +152,122 @@ export function createFakeBluesky(options: FakeBlueskyOptions): FakeBluesky {
     },
     quotePosts: () => storedQuotes,
     posts: () => storedPosts,
-    intercept: () => {
-      vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
-        // Normalising to a Request reads url, method, headers and body the same way for every call style.
-        const request = new Request(input, init);
-        const url = new URL(request.url);
-        if (url.origin !== new URL(options.baseUrl).origin) {
-          throw new Error(`unexpected origin ${url.origin}`);
-        }
-        const method = request.method;
-        served.push({ method, url: url.toString() });
-        if (url.pathname === "/xrpc/com.atproto.server.createSession") {
-          const body = com.atproto.server.createSession.$input.schema.validate(
-            await request.json(),
+    fetch: async (input, init) => {
+      // Normalising to a Request reads url, method, headers and body the same way for every call style.
+      const request = new Request(input, init);
+      const url = new URL(request.url);
+      if (url.origin !== new URL(options.baseUrl).origin) {
+        throw new Error(`unexpected origin ${url.origin}`);
+      }
+      const method = request.method;
+      served.push({ method, url: url.toString() });
+      if (url.pathname === "/xrpc/com.atproto.server.createSession") {
+        const body = com.atproto.server.createSession.$input.schema.validate(await request.json());
+        if (body.identifier !== options.did || body.password !== options.appPassword) {
+          return Response.json(
+            { error: "AuthenticationRequired", message: "Invalid identifier or password" },
+            { status: 401 },
           );
-          if (body.identifier !== options.did || body.password !== options.appPassword) {
-            return Response.json(
-              { error: "AuthenticationRequired", message: "Invalid identifier or password" },
-              { status: 401 },
-            );
-          }
-          const output = {
-            accessJwt: ACCESS_JWT,
-            refreshJwt: "fake-refresh-jwt",
-            handle: "fake.test",
-            did: options.did,
-          };
-          com.atproto.server.createSession.$output.schema.validate(output);
-          return Response.json(output);
         }
-        if (url.pathname === "/xrpc/com.atproto.repo.applyWrites" && method === "POST") {
-          if (request.headers.get("Authorization") !== `Bearer ${ACCESS_JWT}`) {
-            return Response.json(
-              { error: "AuthenticationRequired", message: "Authentication Required" },
-              { status: 401 },
-            );
-          }
-          applyWritesCalls++;
-          const writeFailure = writeFailures.get(applyWritesCalls);
-          if (writeFailure !== undefined) {
-            return Response.json(
-              { error: "InternalServerError", message: "Injected failure" },
-              { status: writeFailure },
-            );
-          }
-          const body = com.atproto.repo.applyWrites.$input.schema.validate(await request.json());
-          if (body.writes.length > MAX_WRITES) {
-            return Response.json(
-              { error: "InvalidRequest", message: `Too many writes. Max: ${MAX_WRITES}` },
-              { status: 400 },
-            );
-          }
-          for (const write of body.writes) {
-            if (
-              write.$type !== "com.atproto.repo.applyWrites#delete" ||
-              !collections.has(write.collection)
-            ) {
-              return Response.json(
-                {
-                  error: "InvalidRequest",
-                  message:
-                    "Only deletes of app.bsky.feed.like and app.bsky.feed.repost are allowed",
-                },
-                { status: 400 },
-              );
-            }
-          }
-          for (const write of body.writes) {
-            const uri = `at://${options.did}/${write.collection}/${write.rkey}`;
-            for (const { stored } of collections.values()) {
-              removeByUri(stored, uri);
-            }
-          }
-          const output = { results: [] };
-          com.atproto.repo.applyWrites.$output.schema.validate(output);
-          return Response.json(output);
+        const output = {
+          accessJwt: ACCESS_JWT,
+          refreshJwt: "fake-refresh-jwt",
+          handle: "fake.test",
+          did: options.did,
+        };
+        com.atproto.server.createSession.$output.schema.validate(output);
+        return Response.json(output);
+      }
+      if (url.pathname === "/xrpc/com.atproto.repo.applyWrites" && method === "POST") {
+        if (request.headers.get("Authorization") !== `Bearer ${ACCESS_JWT}`) {
+          return Response.json(
+            { error: "AuthenticationRequired", message: "Authentication Required" },
+            { status: 401 },
+          );
         }
-        com.atproto.repo.listRecords.$params.fromURLSearchParams(url.searchParams);
-        const failure = failures.get(url.searchParams.get("cursor") ?? "");
-        if (failure !== undefined) {
+        const body = com.atproto.repo.applyWrites.$input.schema.validate(await request.json());
+        received.push(body.writes.map(toFakeWrite));
+        applyWritesCalls++;
+        const writeFailure = writeFailures.get(applyWritesCalls);
+        if (writeFailure !== undefined) {
           return Response.json(
             { error: "InternalServerError", message: "Injected failure" },
-            { status: failure },
+            { status: writeFailure },
           );
         }
-        const repo = url.searchParams.get("repo");
-        // Error shape assumed from the PDS; unverified against the live server.
-        if (repo !== options.did) {
+        if (body.writes.length > MAX_WRITES) {
           return Response.json(
-            { error: "InvalidRequest", message: `Could not find repo: ${repo}` },
+            { error: "InvalidRequest", message: `Too many writes. Max: ${MAX_WRITES}` },
             { status: 400 },
           );
         }
-        const collection = collections.get(url.searchParams.get("collection") ?? "");
-        if (collection === undefined) {
-          return Response.json({ records: [] });
+        for (const write of body.writes) {
+          if (
+            write.$type !== "com.atproto.repo.applyWrites#delete" ||
+            !collections.has(write.collection)
+          ) {
+            return Response.json(
+              {
+                error: "InvalidRequest",
+                message: "Only deletes of app.bsky.feed.like and app.bsky.feed.repost are allowed",
+              },
+              { status: 400 },
+            );
+          }
         }
-        const limit = Number(url.searchParams.get("limit") ?? "50");
-        const start = Number(url.searchParams.get("cursor") ?? "0");
-        const records = collection.stored.slice(start, start + limit).map(collection.toRecord);
-        for (const record of records) {
-          // A missing or malformed createdAt is served as-is; every other field must be valid.
-          collection.assert({ ...record.value, createdAt: "2000-01-01T00:00:00.000Z" });
+        for (const write of body.writes) {
+          const uri = `at://${options.did}/${write.collection}/${write.rkey}`;
+          for (const { stored } of collections.values()) {
+            removeByUri(stored, uri);
+          }
         }
-        // The real server omits the cursor only on the empty page that ends pagination.
-        const output =
-          records.length === 0 ? { records } : { cursor: String(start + records.length), records };
-        com.atproto.repo.listRecords.$output.schema.validate(output);
+        const output = { results: [] };
+        com.atproto.repo.applyWrites.$output.schema.validate(output);
         return Response.json(output);
-      });
+      }
+      com.atproto.repo.listRecords.$params.fromURLSearchParams(url.searchParams);
+      const failure = failures.get(url.searchParams.get("cursor") ?? "");
+      if (failure !== undefined) {
+        return Response.json(
+          { error: "InternalServerError", message: "Injected failure" },
+          { status: failure },
+        );
+      }
+      const repo = url.searchParams.get("repo");
+      // Error shape assumed from the PDS; unverified against the live server.
+      if (repo !== options.did) {
+        return Response.json(
+          { error: "InvalidRequest", message: `Could not find repo: ${repo}` },
+          { status: 400 },
+        );
+      }
+      const collection = collections.get(url.searchParams.get("collection") ?? "");
+      if (collection === undefined) {
+        return Response.json({ records: [] });
+      }
+      const limit = Number(url.searchParams.get("limit") ?? "50");
+      const start = Number(url.searchParams.get("cursor") ?? "0");
+      const records = collection.stored.slice(start, start + limit).map(collection.toRecord);
+      for (const record of records) {
+        // A missing or malformed createdAt is served as-is; every other field must be valid.
+        collection.assert({ ...record.value, createdAt: "2000-01-01T00:00:00.000Z" });
+      }
+      // The real server omits the cursor only on the empty page that ends pagination.
+      const output =
+        records.length === 0 ? { records } : { cursor: String(start + records.length), records };
+      com.atproto.repo.listRecords.$output.schema.validate(output);
+      return Response.json(output);
     },
     requests: () => served,
+    receivedWrites: () => received,
+  };
+}
+
+function toFakeWrite(write: { $type?: string; collection: string; rkey?: string }): FakeWrite {
+  return {
+    $type: write.$type ?? "",
+    collection: write.collection,
+    ...(write.rkey === undefined ? {} : { rkey: write.rkey }),
   };
 }
 

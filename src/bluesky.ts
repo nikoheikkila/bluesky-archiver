@@ -15,10 +15,14 @@ export type SubjectRecord = LikeRecord | RepostRecord;
 export type Collection = SubjectRecord["value"]["$type"];
 type RecordIn<C extends Collection> = Extract<SubjectRecord, { value: { $type: C } }>;
 
+/** The web `fetch`, passed in so the caller decides where requests go. */
+export type Fetch = (input: URL | string, init?: RequestInit) => Promise<Response>;
+
 export interface ListRecordsOptions<C extends Collection = Collection> {
   baseUrl: string;
   did: string;
   collection: C;
+  fetch: Fetch;
 }
 
 export type ListLikesOptions = Omit<ListRecordsOptions, "collection">;
@@ -51,17 +55,17 @@ export async function listRecords<C extends Collection>(
 }
 
 async function fetchPage<T>(
-  { baseUrl, did, collection }: ListRecordsOptions,
+  options: ListRecordsOptions,
   cursor: string | undefined,
 ): Promise<RecordsPage<T>> {
-  const url = new URL(`/xrpc/${LIST_RECORDS}`, baseUrl);
-  url.searchParams.set("repo", did);
-  url.searchParams.set("collection", collection);
+  const url = new URL(`/xrpc/${LIST_RECORDS}`, options.baseUrl);
+  url.searchParams.set("repo", options.did);
+  url.searchParams.set("collection", options.collection);
   url.searchParams.set("limit", PAGE_SIZE);
   if (cursor) {
     url.searchParams.set("cursor", cursor);
   }
-  const response = await fetch(url);
+  const response = await options.fetch(url);
   if (!response.ok) {
     throw new Error(`${LIST_RECORDS} failed with HTTP ${response.status}`);
   }
