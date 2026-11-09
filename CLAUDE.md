@@ -26,6 +26,21 @@ bun run dev                                    # wrangler dev --test-scheduled; 
 bunx wrangler deploy --dry-run --outdir <dir>  # build the bundle without deploying
 ```
 
+Logs (requires [go-task](https://taskfile.dev), `brew install go-task`, and 1Password CLI; tasks live in `Taskfile.yml`):
+
+```bash
+task logs          # stream the deployed Worker's logs, pretty-printed
+task logs:json     # same as JSON lines, for agents and jq
+task logs:errors   # only failed invocations
+```
+
+The tasks run `scripts/tail.sh`, which wraps `wrangler tail` in a loop that reconnects when the
+session expires or drops; Ctrl-C (SIGINT/SIGTERM) stops it. The loop is a bash script because
+task's built-in shell does not support `trap`. `wrangler tail` is live-only (a short gap occurs
+during each reconnect), so leave one running before 03:00 UTC to catch the daily run. The token
+(per-Worker Editor and Metadata Read-Only roles) can tail but cannot query historical logs through
+the API; for history use Workers Logs in the dashboard (3 days).
+
 **Warning:** the scheduled handler deletes likes. Do not trigger it under `bun run dev` against the
 real account.
 

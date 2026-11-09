@@ -1,0 +1,25 @@
+version: "3"
+
+# Streams live logs from the deployed Worker. `wrangler tail` only shows invocations that
+# happen while it is attached, and tail sessions expire after a few hours or drop silently,
+# so scripts/tail.sh reconnects in a loop until interrupted with Ctrl-C. Leave one running
+# to catch the 03:00 UTC run. Secrets are resolved from the op:// references in .env by 1Password.
+#
+# The loop lives in a real bash script because task's built-in shell interpreter does not
+# support `trap`.
+
+tasks:
+  logs:
+    desc: Stream the deployed Worker's logs (pretty), reconnecting when the session ends
+    cmds:
+      - bash scripts/tail.sh --format pretty
+
+  logs:json:
+    desc: Stream the deployed Worker's logs as JSON lines (for agents and jq), reconnecting
+    cmds:
+      - bash scripts/tail.sh --format json
+
+  logs:errors:
+    desc: Stream only failed invocations (pretty), reconnecting
+    cmds:
+      - bash scripts/tail.sh --format pretty --status error
