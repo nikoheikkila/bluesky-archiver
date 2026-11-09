@@ -1,5 +1,4 @@
 ---
-
 name: add-record-kind
 description: Checklist for adding a new Bluesky record kind (for example posts) to the daily deletion run in bluesky-archiver, based on how reposts were added after likes. Use when specifying or implementing a slice that makes the Worker list or delete another collection, when extending the fake Bluesky server to a new collection, or when estimating the request budget of a new kind.
 ---
@@ -11,9 +10,6 @@ checklist records what that slice needed, in the order that kept every chunk saf
 
 ## 1. Measure before specifying
 
-- `task count -- --at <next 03:00 UTC> <nsid>` lists the collection through the public endpoint.
-  It prints the total, the number older than one year, undatable records and listing requests.
-  `task count` with no collection gives the whole run's budget for likes and reposts.
 - Budget per collection: `ceil(n / 100) + 1` listing requests, plus `ceil(old / 200)`
   `applyWrites`, plus one shared `createSession`. Stop and ask above 45 in total (the Free plan
   allows 50).

@@ -65,14 +65,10 @@ next 03:00 UTC run after a push deletes for real.
 ## Checking the daily run
 
 ```bash
-task count                                   # likes and reposts older than one year right now, and the requests a run would send
-task count -- --at 2026-11-10T03:00:00Z      # the same, judged at a given run start
 task logs                                    # stream the deployed Worker's logs live
 ```
 
-`task count` reads the public endpoint without logging in, independently of the Worker's code.
-After a successful run, it should find nothing older than one year at that run's start. `task logs`
-shows only live invocations, so start it before 03:00 UTC. For past runs, use Workers Logs in the
+`task logs` shows only live invocations, so start it before 03:00 UTC. For past runs, use Workers Logs in the
 Cloudflare dashboard, which keeps 3 days on the Free plan.
 
 ## Development

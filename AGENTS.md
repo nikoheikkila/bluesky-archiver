@@ -3,14 +3,14 @@
 Guidance for coding agents working in this repository: what the Worker does, the commands, the
 architecture, the constraints, and the pitfalls learned in earlier sessions.
 
-## What this is
+## What This Is
 
 A Cloudflare Worker (TypeScript, Wrangler) that runs daily at 03:00 UTC against one Bluesky account
 (DID and server URL are Wrangler `vars` in `wrangler.jsonc`). Each run permanently deletes the
 account's likes and reposts that are older than one year (the age rule is under
 [Constraints](#constraints)). There is no mode or flag that turns deletion off. Reposts are direct
 `app.bsky.feed.repost` records only. Posts (including quote posts) are not touched yet. Later
-slices may add posts, and OAuth in place of the app password.
+slices add the posts.
 
 ## Commands
 
@@ -31,21 +31,10 @@ task mutation:incremental                   # Stryker reusing reports/stryker-in
 task mutation:diff [-- <base>]              # mutate only src/ files changed against the base branch (clean tree required)
 task dev                                    # wrangler dev --test-scheduled; trigger with GET /cdn-cgi/handler/scheduled
 bunx wrangler deploy --dry-run --outdir <dir>  # build the bundle without deploying
-task count                                  # live count of likes/reposts older than one year + the run's request budget
-task count -- --at <ISO time> [nsid ...]    # judged at a given run start, for chosen collections
 task logs                                   # stream the deployed Worker's logs, pretty-printed (needs the 1Password CLI)
 task logs:json                              # same as JSON lines, for agents and jq
 task logs:errors                            # only failed invocations
 ```
-
-**Warning:** the scheduled handler deletes likes and reposts. Do not trigger it under `task dev`
-against the real account.
-
-`task count` runs `scripts/count-old.ts` with Bun. It reads the DID and server URL from
-`wrangler.jsonc`, reads only the public endpoint and never logs in. It is independent of `src/` on
-purpose, so a broken listing in the Worker cannot hide old records from it and it can cross-check
-the Worker's counts. It is not part of the bundle or of `tsc` (outside `tsconfig.json`'s
-`include`). Use its numbers in specs instead of counting by hand.
 
 Biome (`biome.json`) formats and lints the code. A Lefthook pre-commit hook (`lefthook.yml`,
 installed by `bun install` via `prepare`) runs `biome check --write` on staged files.
@@ -54,6 +43,11 @@ CI (`.github/workflows/deploy.yml`) runs on every push to `main`: the `test` job
 `task typecheck`, `task test` and `task mutation:incremental` (with
 `reports/stryker-incremental.json` cached), then the `deploy` job runs `wrangler deploy` using the
 `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` repository secrets.
+
+### Version Control
+
+This project uses Trunk-Based Development. Commits and pushes to `main` branch are allowed **if and only if** the
+commit hooks pass. Never create a new feature branch unless the user explicitly tells you to.
 
 ### Logs
 
@@ -69,7 +63,7 @@ In Workers Logs, filter on `$metadata.level` = `info` for the summary lines only
 the per-record lines. `wrangler tail` shows the same level per line (`.logs[].level` in
 `task logs:json`).
 
-### Mutation testing
+### Mutation Testing
 
 Stryker (`stryker.config.mjs`, Vitest runner) mutates `src/` except `src/index.ts`, which only binds
 the global `fetch`, `console.debug` and `console.info` and cannot be tested without patching a
@@ -118,14 +112,14 @@ that kind, and a failed likes request stops the run before any repost request.
   run it against the fake and pin each line's level.
 - `src/index.ts` — the only file allowed to use Worker-specific APIs, and the only place bound to
   the real network and log: `export default createWorker({ fetch: (input, init) => fetch(input,
-  init), log: ({ level, message }) => writers[level](message) })`, where `writers` maps each
+init), log: ({ level, message }) => writers[level](message) })`, where `writers` maps each
   `LogLevel` to the `console` method of the same name, which Workers Logs records as
   `$metadata.level`. The arrow keeps `fetch` called on the global (workerd rejects a detached
   `fetch` with "Illegal invocation"). Biome's `noConsole` allows only `log`, `debug` and `info`.
   Keep named runtime exports out of the main module. Every other file uses only web-standard APIs
   (`fetch`, `Date`, `console`) so the core can be reused.
 
-### Tests and the verified fake
+### Tests and the Verified Fake
 
 - Every test runs against `test/fake-bluesky.ts`, an in-process fake, and no test may reach the
   real server. Tests pass its `fetch` (`bluesky.fetch`) to the code under test. The `fetch`
@@ -157,7 +151,7 @@ that kind, and a failed likes request stops the run before any repost request.
   `experimental.fsModuleCache` does not work under workerd.
 - `test/env.d.ts` augments the global `Cloudflare.Env` with the Worker's `Env` for typing in tests.
 
-### Lexicon validation and deliberately invalid fixtures
+### Lexicon Validation and Deliberately Invalid Fixtures
 
 - The fake validates every request and response against the official lexicons shipped in
   `@bsky/sdk`. Every like and repost record it serves, and every quote post it stores, is validated
@@ -173,7 +167,7 @@ that kind, and a failed likes request stops the run before any repost request.
 - A served record must omit a missing `createdAt`, not carry `createdAt: undefined`; the fake's own
   response validation rejects the latter.
 
-### Test style
+### Test Style
 
 - No `vi.mock`, `vi.spyOn`, `vi.fn` or `vi.mocked`. The code under test takes its I/O as
   parameters: pass the fake's `fetch`, a hand-written stub such as
@@ -188,7 +182,7 @@ that kind, and a failed likes request stops the run before any repost request.
 - The one exception is the paging loop in `test/contract/list-records.contract.ts`: how many pages
   exist is what the walk finds out. It only collects pages, and every assertion runs after it.
 
-### Tests that pin the whole run
+### Tests That Pin the Whole Run
 
 - Both acceptance tests and most of `test/scheduled.test.ts` assert the complete log
   (`toStrictEqual` over every entry, level included) and exact request sequences or counts. Adding
@@ -225,21 +219,13 @@ that kind, and a failed likes request stops the run before any repost request.
   on stdin, because the interactive prompt fails under `op run`. The Vitest runner also loads `.env`
   into the Worker's env in local tests, where the values stay unresolved references.
 
-### Request budget
+### Request Budget
 
 - The Workers Free plan allows at most 50 outgoing requests per invocation and has a CPU limit. A
   run uses about 31 requests at the current backlog, and the specs escalate above 45.
 - Per collection, listing costs `ceil(n / 100) + 1` requests (every non-empty page has a cursor,
   then one empty page ends it). Add 1 `createSession` when anything is old, and
-  `ceil(old / 200)` `applyWrites` per collection. `task count` prints these numbers for the live
-  account.
-
-## Verifying a deployed run
-
-- The next 03:00 UTC run after a CI deploy deletes for real.
-- Run `task count -- --at <next run time>` before the run and `task count` after it. Cross-check
-  with the run's `Deleted X of X …` info lines in Workers Logs, which are how the daily found count
-  is checked.
+  `ceil(old / 200)` `applyWrites` per collection.
 
 ## Workflow
 
@@ -249,20 +235,3 @@ or force-add it. Feature files in `feature/` are tracked. Each spec has one Gher
 (the acceptance test) and a plan of TDD cycles; commits use Conventional Commits (`feat:`, `fix:`,
 `docs(spec):`). Adding a record kind (posts are next) follows
 `.claude/skills/add-record-kind/SKILL.md`.
-
-### Agentic-CD sessions in this repository
-
-- Send each user answer to the orchestrator in the same message that resumes it, or it asks again.
-- Verify every checkpoint from disk, not from the report: `git status --short`, then
-  `task test >/dev/null 2>&1; echo $?`. Piping `task test` into `tail` hides its exit code.
-- A subagent report can be lost: the harness refuses a second hand-back in one result. When that
-  happens, rebuild the checkpoint from `git diff --cached` and a test run.
-- An orchestrator or review orchestrator can return before its own background agents finish (it
-  reports "waiting on its own background work", or a review says "not complete"). Wait for the
-  completion notification, then resume it with SendMessage so it can aggregate. Stop an
-  orchestrator with TaskStop once its work is staged and verified, so a late phase agent cannot
-  write over reviewed files. `review-diff.sh --check-pass` before each commit catches such writes.
-- A blocked chunk with finished steps still gets its own review and commit before the remaining
-  step runs; cycles 3 and 4 were committed while cycle 5 waited on a decision.
-- A decision that changes the spec is an edit to its Musts plus an `Amendment` line in its decision
-  log. Like the rest of the spec, the amendment lives only on this machine.
