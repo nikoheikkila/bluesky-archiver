@@ -1,4 +1,4 @@
-import type { LikeRecord } from "./bluesky";
+import type { SubjectRecord } from "./bluesky";
 
 export interface DeletionSummary {
   found: number;
@@ -6,25 +6,30 @@ export interface DeletionSummary {
   skipped: number;
 }
 
-function skippedLine(skipped: number): string {
-  const likes = skipped === 1 ? "1 like" : `${skipped} likes`;
-  return `Skipped ${likes} without a valid creation time`;
+type Noun = "like" | "repost";
+
+function plural(count: number, noun: Noun): string {
+  return count === 1 ? noun : `${noun}s`;
 }
 
-export function formatLikeLine(like: LikeRecord): string {
-  return `${like.value.createdAt} ${like.value.subject.uri}`;
+export function formatRecordLine(record: SubjectRecord): string {
+  return `${record.value.createdAt} ${record.value.subject.uri}`;
 }
 
-export function formatDeletionSummary({ found, deleted, skipped }: DeletionSummary): string[] {
+export const formatLikeLine = formatRecordLine;
+
+export function formatDeletionSummary(
+  { found, deleted, skipped }: DeletionSummary,
+  noun: Noun = "like",
+): string[] {
   const lines: string[] = [];
   if (skipped > 0) {
-    lines.push(skippedLine(skipped));
+    lines.push(`Skipped ${skipped} ${plural(skipped, noun)} without a valid creation time`);
   }
   if (found === 0) {
-    lines.push("No likes are older than one year");
+    lines.push(`No ${noun}s are older than one year`);
   } else {
-    const noun = found === 1 ? "like" : "likes";
-    lines.push(`Deleted ${deleted} of ${found} ${noun} older than one year`);
+    lines.push(`Deleted ${deleted} of ${found} ${plural(found, noun)} older than one year`);
   }
   return lines;
 }

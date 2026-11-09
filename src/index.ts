@@ -1,5 +1,5 @@
 import { LIKE_COLLECTION, type LikeRecord, listRecords } from "./bluesky";
-import { deleteLikes } from "./delete";
+import { deleteRecords } from "./delete";
 import { formatDeletionSummary, formatLikeLine } from "./report";
 import { selectOldRecords } from "./select";
 import { login } from "./session";
@@ -54,7 +54,7 @@ class OldLikesCleaner {
     }
     const session = await this.login();
     let deleted = 0;
-    await deleteLikes(old, {
+    await deleteRecords(LIKE_COLLECTION, old, {
       did: this.env.BLUESKY_DID,
       fetchHandler: session.fetchHandler,
       onBatchDeleted: (batch) => {
