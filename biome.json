@@ -7,7 +7,15 @@
   },
   "files": {
     "ignoreUnknown": true,
-    "includes": ["**", "!specs", "!.wrangler", "!.idea", "!.agents", "!worker-configuration.d.ts"]
+    "includes": [
+      "**",
+      "!specs",
+      "!.wrangler",
+      "!.idea",
+      "!.agents",
+      "!.claude",
+      "!worker-configuration.d.ts"
+    ]
   },
   "formatter": {
     "enabled": true,
