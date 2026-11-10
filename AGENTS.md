@@ -31,7 +31,6 @@ task check                                  # lint + typecheck + test + incremen
 task mutation                               # full Stryker run (slow; end-of-phase gate only)
 task mutation:incremental                   # Stryker reusing reports/stryker-incremental.json
 task mutation:diff [-- <base>]              # mutate only src/ files changed against the base branch (clean tree required)
-task dev                                    # wrangler dev --test-scheduled; trigger with GET /cdn-cgi/handler/scheduled
 bunx wrangler deploy --dry-run --outdir <dir>  # build the bundle without deploying
 task logs                                   # stream the deployed Worker's logs, pretty-printed (needs the 1Password CLI)
 task logs:json                              # same as JSON lines, for agents and jq
@@ -146,15 +145,27 @@ init), log: ({ level, message }) => writers[level](message) })`, where `writers`
 - Every test runs against `test/fake-bluesky.ts`, an in-process fake, and no test may reach the
   real server. Tests pass its `fetch` (`bluesky.fetch`) to the code under test. The `fetch`
   parameters in `src/` are required, so a test that forgets the fake fails typecheck, and the fake
-  rejects any other origin. It serves `createSession`, `listRecords` and `applyWrites`, and offers
-  failure injection (`failPage` per cursor, `failApplyWrites` per call). `receivedWrites()` returns
-  the writes of every authorised `applyWrites` call in order, refused ones included. `addLikes()`
-  and `addReposts()` seed many records in one call.
+  rejects any other origin. It serves `createSession`, `listRecords`, `applyWrites` and `getRecord`
+  (the profile only), and offers failure injection (`failPage` per cursor, `failApplyWrites` per
+  call, `failProfileRead` for the profile read). `receivedWrites()` returns the writes of every
+  authorised `applyWrites` call in order, refused ones included. `addLikes()` and `addReposts()`
+  seed many records in one call.
 - `listRecords` serves `app.bsky.feed.like`, `app.bsky.feed.repost`, `app.bsky.feed.post`,
   `app.bsky.feed.threadgate` (reply settings) and `app.bsky.feed.postgate` (quote settings).
   `applyWrites` accepts deletes of those five collections only, at most 200 per call; it rejects
   any other collection, including `app.bsky.actor.profile`, with HTTP 400 and deletes nothing in
   that case.
+- `getRecord` serves the account's profile record (`app.bsky.actor.profile`, record key `self`).
+  Its response is `{ uri: "at://<did>/app.bsky.actor.profile/self", cid, value }`, and the fake
+  validates the served `value` against the `app.bsky.actor.profile` lexicon.
+- With no profile stored, `getRecord` answers HTTP 400 `{ "error": "RecordNotFound", "message":
+  "Could not locate record: at://<did>/app.bsky.actor.profile/self" }`, as the real server does.
+- Any other `getRecord`, meaning another collection or another record key, makes the fake throw, as
+  it does for an unexpected origin.
+- `pinPost(post, { cid? })` stores the profile with that post pinned. The post is an account post or
+  another account's post from `addPost()`. The CID defaults to the post's, and `cid` overrides it.
+- `addProfileWithoutPin()` stores a profile with no `pinnedPost`.
+- `failProfileRead({ status })` makes every profile read answer with that HTTP status.
 - The account's own posts (plain, reply, and quote posts with an `app.bsky.embed.record` or
   `app.bsky.embed.recordWithMedia` embed) are stored with `addAccountPost(post)` and read back with
   `accountPosts()`. `listRecords` serves them, and the fake validates each against its lexicon when
@@ -176,9 +187,10 @@ init), log: ({ level, message }) => writers[level](message) })`, where `writers`
   embed, seeded with `addAccountPost()`. `listRecords` lists them like the other account posts.
 - **The fake must behave like the real server.** Every collection pages the same way: every
   non-empty page carries a cursor, even the last partial one, and paging ends on an empty page
-  without a cursor. `test/contract/` holds the shared contract suites (`list-records.contract.ts`
-  and `write.contract.ts`), run against the fake by `test/contract/fake.test.ts` in the default
-  suite. Change the fake only together with its contract.
+  without a cursor. `test/contract/` holds the shared contract suites (`list-records.contract.ts`,
+  `write.contract.ts` and `get-record.contract.ts`), run against the fake by
+  `test/contract/fake.test.ts` in the default suite. Change the fake only together with its
+  contract.
 - Tests fix the run start explicitly so they pass at any wall-clock time.
 - `test/delete-old-likes.acceptance.test.ts`, `test/delete-old-reposts.acceptance.test.ts` and
   `test/delete-old-posts.acceptance.test.ts` drive the Worker's `scheduled` entry point, built by

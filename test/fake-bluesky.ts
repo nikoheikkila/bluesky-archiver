@@ -87,7 +87,13 @@ export interface FakeBluesky {
   replySettings(): FakePostSettings[];
   addQuoteSettings(settings: NewPostSettings): FakePostSettings;
   quoteSettings(): FakePostSettings[];
+  /** Stores the account's profile with this post pinned; a later call replaces the earlier profile. */
+  pinPost(post: FakeAccountPost | FakePost, options?: { cid?: string }): void;
+  /** Stores the account's profile with no pinned post. */
+  addProfileWithoutPin(): void;
   failPage(failure: { cursor: string; status: number }): void;
+  /** Makes the profile read (getRecord for app.bsky.actor.profile) answer with this HTTP status. */
+  failProfileRead(failure: { status: number }): void;
   failApplyWrites(failure: { call: number; status: number }): void;
   /** The fake server's endpoint; pass it wherever the code under test takes a `fetch`. */
   fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
@@ -104,11 +110,14 @@ export function createFakeBluesky(options: FakeBlueskyOptions): FakeBluesky {
   const storedAccountPosts: FakeAccountPost[] = [];
   const storedReplySettings: FakePostSettings[] = [];
   const storedQuoteSettings: FakePostSettings[] = [];
+  // One profile record per account: empty, or holding the one stored profile value.
+  let storedProfile: Record<string, unknown> | undefined;
   const served: { method: string; url: string }[] = [];
   const received: FakeWrite[][] = [];
   const failures = new Map<string, number>();
   const writeFailures = new Map<number, number>();
   let applyWritesCalls = 0;
+  let profileFailure: number | undefined;
   // Likes and reposts are served and deleted the same way; only their record shape differs.
   const collections = new Map<string, DeletableCollection>([
     ["app.bsky.feed.like", { stored, toRecord: toLikeRecord, assert: app.bsky.feed.like.$assert }],
@@ -185,6 +194,9 @@ export function createFakeBluesky(options: FakeBlueskyOptions): FakeBluesky {
     failApplyWrites: ({ call, status }) => {
       writeFailures.set(call, status);
     },
+    failProfileRead: ({ status }) => {
+      profileFailure = status;
+    },
     failPage: ({ cursor, status }) => {
       failures.set(cursor, status);
     },
@@ -213,6 +225,12 @@ export function createFakeBluesky(options: FakeBlueskyOptions): FakeBluesky {
       return created;
     },
     accountPosts: () => storedAccountPosts,
+    pinPost: (post, pinOptions) => {
+      storedProfile = validProfile({ pinnedPost: { uri: post.uri, cid: pinOptions?.cid ?? CID } });
+    },
+    addProfileWithoutPin: () => {
+      storedProfile = validProfile({ displayName: "Fake account" });
+    },
     addReplySettings: (settings) => addSettings(storedReplySettings, REPLY_SETTINGS, settings),
     replySettings: () => storedReplySettings,
     addQuoteSettings: (settings) => addSettings(storedQuoteSettings, QUOTE_SETTINGS, settings),
@@ -291,6 +309,35 @@ export function createFakeBluesky(options: FakeBlueskyOptions): FakeBluesky {
         com.atproto.repo.applyWrites.$output.schema.validate(output);
         return Response.json(output);
       }
+      if (url.pathname === "/xrpc/com.atproto.repo.getRecord") {
+        const params = com.atproto.repo.getRecord.$params.fromURLSearchParams(url.searchParams);
+        if (
+          params.repo !== options.did ||
+          params.collection !== "app.bsky.actor.profile" ||
+          params.rkey !== "self"
+        ) {
+          throw new Error(`unexpected getRecord ${params.collection}/${params.rkey}`);
+        }
+        const uri = `at://${options.did}/app.bsky.actor.profile/self`;
+        if (profileFailure !== undefined) {
+          return Response.json(
+            {
+              error: profileFailure === 400 ? "InvalidRequest" : "InternalServerError",
+              message: "Injected failure",
+            },
+            { status: profileFailure },
+          );
+        }
+        if (storedProfile === undefined) {
+          return Response.json(
+            { error: "RecordNotFound", message: `Could not locate record: ${uri}` },
+            { status: 400 },
+          );
+        }
+        const output = { uri, cid: CID, value: storedProfile };
+        com.atproto.repo.getRecord.$output.schema.validate(output);
+        return Response.json(output);
+      }
       com.atproto.repo.listRecords.$params.fromURLSearchParams(url.searchParams);
       const failure = failures.get(url.searchParams.get("cursor") ?? "");
       if (failure !== undefined) {
@@ -327,6 +374,12 @@ export function createFakeBluesky(options: FakeBlueskyOptions): FakeBluesky {
     requests: () => served,
     receivedWrites: () => received,
   };
+}
+
+function validProfile(fields: Record<string, unknown>): Record<string, unknown> {
+  const value = { $type: "app.bsky.actor.profile", ...fields };
+  app.bsky.actor.profile.$assert(value);
+  return value;
 }
 
 function toFakeWrite(write: { $type?: string; collection: string; rkey?: string }): FakeWrite {

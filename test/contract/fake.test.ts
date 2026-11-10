@@ -9,6 +9,13 @@ import {
   type NewPostSettings,
   type NewRepost,
 } from "../fake-bluesky";
+import {
+  fetchRecord,
+  PROFILE_COLLECTION,
+  profileUri,
+  walkMissingProfile,
+  walkProfile,
+} from "./get-record.contract";
 import { walkListRecords } from "./list-records.contract";
 import { FORBIDDEN_WRITES, walkRejectedWrite, walkWrites } from "./write.contract";
 
@@ -539,4 +546,90 @@ test("fake Bluesky keeps reply settings and quote settings of one post together"
 
   expect(bluesky.replySettings()).toStrictEqual([reply]);
   expect(bluesky.quoteSettings()).toStrictEqual([quote]);
+});
+
+test("fake Bluesky serves the profile with a pinned post through getRecord and validates it against its lexicon", async () => {
+  const bluesky = createFakeBluesky({ did: DID, baseUrl: BASE_URL });
+  const post = bluesky.addAccountPost(PLAIN_POST);
+  bluesky.pinPost(post);
+
+  const served = await walkProfile({ baseUrl: BASE_URL, did: DID, fetch: bluesky.fetch });
+
+  expect(served).toStrictEqual({
+    uri: profileUri(DID),
+    cid: expect.any(String),
+    value: { $type: PROFILE_COLLECTION, pinnedPost: { uri: post.uri, cid: expect.any(String) } },
+  });
+});
+
+test("fake Bluesky serves the profile of a pinned post of another account through getRecord", async () => {
+  const bluesky = createFakeBluesky({ did: DID, baseUrl: BASE_URL });
+  const post = bluesky.addPost("a post of another account");
+  bluesky.pinPost(post);
+
+  const served = await walkProfile({ baseUrl: BASE_URL, did: DID, fetch: bluesky.fetch });
+
+  expect(served.value?.pinnedPost?.uri).toBe(post.uri);
+});
+
+test("fake Bluesky serves a profile without a pinned post through getRecord without pinnedPost", async () => {
+  const bluesky = createFakeBluesky({ did: DID, baseUrl: BASE_URL });
+  bluesky.addProfileWithoutPin();
+
+  const served = await walkProfile({ baseUrl: BASE_URL, did: DID, fetch: bluesky.fetch });
+
+  expect(served.value).not.toHaveProperty("pinnedPost");
+});
+
+test("fake Bluesky answers getRecord with HTTP 400 RecordNotFound when no profile is stored", async () => {
+  const bluesky = createFakeBluesky({ did: DID, baseUrl: BASE_URL });
+
+  await walkMissingProfile({ baseUrl: BASE_URL, did: DID, fetch: bluesky.fetch });
+});
+
+test.each([
+  { status: 500, problem: "a server failure" },
+  { status: 400, problem: "a client error other than RecordNotFound" },
+])(
+  "fake Bluesky answers the profile read with HTTP $status for $problem when it is injected",
+  async ({ status }) => {
+    const bluesky = createFakeBluesky({ did: DID, baseUrl: BASE_URL });
+    bluesky.pinPost(bluesky.addAccountPost(PLAIN_POST));
+    bluesky.failProfileRead({ status });
+
+    const response = await fetchRecord({ baseUrl: BASE_URL, did: DID, fetch: bluesky.fetch });
+
+    expect(response).toStrictEqual({
+      status,
+      body: { error: expect.not.stringMatching(/^RecordNotFound$/), message: expect.any(String) },
+    });
+  },
+);
+
+test.each([
+  { problem: "another collection", collection: "app.bsky.feed.post", rkey: "self" },
+  { problem: "another record key", collection: PROFILE_COLLECTION, rkey: "other" },
+])("fake Bluesky refuses a getRecord for $problem by throwing", async ({ collection, rkey }) => {
+  const bluesky = createFakeBluesky({ did: DID, baseUrl: BASE_URL });
+  bluesky.pinPost(bluesky.addAccountPost(PLAIN_POST));
+
+  await expect(
+    fetchRecord({ baseUrl: BASE_URL, did: DID, fetch: bluesky.fetch, collection, rkey }),
+  ).rejects.toThrow();
+});
+
+test("the getRecord contract rejects a served profile that breaks its lexicon", async () => {
+  const broken: Fetch = async () =>
+    Response.json({
+      uri: profileUri(DID),
+      cid: "bafyreie5737gdxlw5i64vzichcalba3z2v5n6icifvx5xytvske7mr3hpm",
+      value: {
+        $type: PROFILE_COLLECTION,
+        pinnedPost: { uri: "not-an-at-uri", cid: "not-a-cid" },
+      },
+    });
+
+  await expect(walkProfile({ baseUrl: BASE_URL, did: DID, fetch: broken })).rejects.toThrow(
+    "the served profile validates against its lexicon",
+  );
 });
