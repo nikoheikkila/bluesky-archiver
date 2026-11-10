@@ -18,5 +18,6 @@ export default defineConfig({
     isolate: false,
     // Pre-bundle the fake's lexicon validator into one module instead of hundreds of small ones.
     deps: { optimizer: { ssr: { enabled: true, include: ["@bsky/sdk/lexicons"] } } },
+    onConsoleLog: () => false,
   },
 });
