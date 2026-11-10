@@ -3,7 +3,7 @@ import { app, com } from "@bsky/sdk/lexicons";
 const CID = "bafyreie5737gdxlw5i64vzichcalba3z2v5n6icifvx5xytvske7mr3hpm";
 const ACCESS_JWT = "fake-access-jwt";
 const MAX_WRITES = 200;
-const OTHER_ACCOUNT_DID = "did:plc:otheraccount00000000000";
+const OTHER_ACCOUNT_DID = "did:plc:otheraccount222222222222";
 
 // In-process fake of the Bluesky server. Code under test receives its `fetch` instead of the
 // global one, so the suite never reaches the network; it rejects any other origin.
@@ -167,8 +167,13 @@ export function createFakeBluesky(options: FakeBlueskyOptions): FakeBluesky {
       ...extra,
       createdAt: "2000-01-01T00:00:00.000Z",
     });
+    const rkey = recordKey(post);
+    const uri = `at://${options.did}/${kind.collection}/${rkey}`;
+    if (store.some((existing) => existing.uri === uri)) {
+      throw new Error(`duplicate record key ${rkey} in ${kind.collection}`);
+    }
     const created = {
-      uri: `at://${options.did}/${kind.collection}/${recordKey(post)}`,
+      uri,
       post,
       createdAt: settings.createdAt,
       ...extra,

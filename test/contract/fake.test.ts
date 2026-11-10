@@ -377,12 +377,15 @@ test("fake Bluesky keeps the posts that likes point at out of the account's post
   expect(pages.flat().map((record) => record.uri)).toStrictEqual([own.uri]);
 });
 
-test("fake Bluesky mints the posts that likes point at under another account's DID", () => {
+test("fake Bluesky mints the posts that likes point at under a well-formed did:plc of another account", () => {
   const bluesky = createFakeBluesky({ did: DID, baseUrl: BASE_URL });
 
   const subject = bluesky.addPost("a post of another account");
 
-  expect(subject.uri.split("/")[2]).not.toBe(DID);
+  expect(subject.uri.split("/")[2]).toBe("did:plc:otheraccount222222222222");
+  expect(subject.uri).toMatch(
+    /^at:\/\/did:plc:otheraccount222222222222\/app\.bsky\.feed\.post\/[A-Za-z0-9._~:-]+$/,
+  );
 });
 
 const SETTINGS_KINDS = [
@@ -511,4 +514,29 @@ test.each(
     status: 200,
     records: [{ uri: expect.stringContaining(`/${kind.collection}/`), createdAt: kind.createdAt }],
   });
+});
+
+test.each(SETTINGS_KINDS)(
+  "fake Bluesky refuses a second $noun record for the same post like a duplicate record key",
+  (kind) => {
+    const bluesky = createFakeBluesky({ did: DID, baseUrl: BASE_URL });
+    const post = bluesky.addAccountPost(PLAIN_POST);
+    const settings = { post, createdAt: "2025-01-01T00:00:00.000Z" } as NewPostSettings;
+    const first = kind.add(bluesky, settings);
+
+    expect(() => kind.add(bluesky, settings)).toThrow();
+    expect(kind.stored(bluesky)).toStrictEqual([first]);
+  },
+);
+
+test("fake Bluesky keeps reply settings and quote settings of one post together", () => {
+  const bluesky = createFakeBluesky({ did: DID, baseUrl: BASE_URL });
+  const post = bluesky.addAccountPost(PLAIN_POST);
+  const settings = { post, createdAt: "2025-01-01T00:00:00.000Z" } as NewPostSettings;
+
+  const reply = bluesky.addReplySettings(settings);
+  const quote = bluesky.addQuoteSettings(settings);
+
+  expect(bluesky.replySettings()).toStrictEqual([reply]);
+  expect(bluesky.quoteSettings()).toStrictEqual([quote]);
 });

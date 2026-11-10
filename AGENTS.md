@@ -103,24 +103,35 @@ that kind, and a failed request in one kind stops the run before any request of 
 - `src/domain-types.ts` — type-only, emits nothing at runtime: the Bluesky lexicon record types
   (`SubjectRecordOf`, `LikeRecord`, `RepostRecord`, `SubjectRecord`, `DatedRecordOf`, `DatedRecord`,
   `Collection`, `RecordIn`). A subject record is a like or repost; a dated record is any record
-  with a `createdAt`, which also covers posts, reply settings and quote settings. Modules import
-  them with `import type`.
+  with a `createdAt`, which also covers posts, reply settings and quote settings. `RecordIn<C>`
+  maps each collection to its own record type through a lookup, so an unnarrowed `Collection` gives
+  the union of all five record types. `DatedRecord`'s `createdAt` is optional, because network
+  records may lack it. Modules import them with `import type`.
 - `src/select.ts` — `selectOldRecords(records, runStart)` holds the one age rule and returns the
   old records oldest first. A record with a missing or unparseable `createdAt` is counted as
   skipped. `selectOldLikes` is a thin wrapper over it.
 - `src/session.ts` — `login({ baseUrl, did, password, fetch })` returns `fetchHandler(path, init)`,
   the atproto `Agent` shape. The deletion code depends only on `fetchHandler`, not on a raw token.
 - `src/delete.ts` — `deleteRecords()` batches `com.atproto.repo.applyWrites` deletes for any
-  collection, at most 200 per call. `deleteLikes()` is a thin wrapper over it.
+  collection, at most 200 per call. It is generic in its collection, so the records must be of that
+  collection's type. Before the first `applyWrites`, it refuses a record whose URI is not
+  `at://<did>/<collection>/<rkey>`, so no request is sent for it. `deleteLikes()` is a thin wrapper
+  over it.
 - `src/report.ts` — `formatRecordLine()`, `formatLikeLine()` and `formatDeletionSummary()`, whose
   noun is "like", "repost", "post", "reply settings" or "quote settings". The settings nouns never
   change form. `formatRecordLine(record, noun)` prints the URI of the deleted record itself, not its
   subject or its post. Wording is fixed by the spec.
-- `src/worker.ts` — `createWorker({ fetch, log })` returns the handlers object with `scheduled`.
-  It reads the `BLUESKY_APP_PASSWORD` secret and fails before listing when it is missing. Every
-  request goes through the injected `fetch` and every report line through the injected `log` as a
-  `LogEntry` (`{ level, message }`, where `LogLevel` is `"debug"` or `"info"`), which is how tests
-  run it against the fake and pin each line's level.
+- `src/timeout.ts` — `withRequestTimeout(fetch, timeoutMs)` returns a fetch that aborts every
+  request after `REQUEST_TIMEOUT_MS` (10 seconds). `createWorker` applies it to the injected fetch,
+  so `createSession`, `listRecords` and `applyWrites` all have it. A timed-out request rejects and
+  fails the run like any other failed request. The module imports nothing from `@bsky/sdk` or
+  `@atproto/lex`.
+- `src/worker.ts` — `createWorker({ fetch, log, requestTimeoutMs })` returns the handlers object
+  with `scheduled`. The optional `requestTimeoutMs` defaults to `REQUEST_TIMEOUT_MS` (10 seconds);
+  tests inject a short value. It reads the `BLUESKY_APP_PASSWORD` secret and fails before listing
+  when it is missing. Every request goes through the injected `fetch` and every report line through
+  the injected `log` as a `LogEntry` (`{ level, message }`, where `LogLevel` is `"debug"` or
+  `"info"`), which is how tests run it against the fake and pin each line's level.
 - `src/index.ts` — the only file allowed to use Worker-specific APIs, and the only place bound to
   the real network and log: `export default createWorker({ fetch: (input, init) => fetch(input,
 init), log: ({ level, message }) => writers[level](message) })`, where `writers` maps each
@@ -157,6 +168,10 @@ init), log: ({ level, message }) => writers[level](message) })`, where `writers`
 - Subject posts from `addPost()` belong to another account and never appear in the account's post
   listing. The test harness can delete them with `deletePost()` (likes and reposts remain, as on
   the real server).
+- The fake refuses a second reply-settings or quote-settings record for the same post, meaning the
+  same record key in the same collection, by throwing, as a real server refuses a duplicate record
+  key. One post can have one reply-settings record and one quote-settings record. Subject posts that
+  likes and reposts point at belong to `did:plc:otheraccount222222222222`, a well-formed `did:plc`.
 - Quote posts are account posts with an `app.bsky.embed.record` or `app.bsky.embed.recordWithMedia`
   embed, seeded with `addAccountPost()`. `listRecords` lists them like the other account posts.
 - **The fake must behave like the real server.** Every collection pages the same way: every
@@ -250,14 +265,36 @@ init), log: ({ level, message }) => writers[level](message) })`, where `writers`
 
 ### Request Budget
 
-- The Workers Free plan allows at most 50 outgoing requests per invocation and has a CPU limit. At
-  today's numbers a run makes 41 requests (37 listings, 1 `createSession`, 3 `applyWrites`), under
-  the 50 limit and the 45 point where the specs escalate. After the post backlog is cleared, a run
-  makes at most about 40 (34 listings, 1 login, up to one batch per kind across the five kinds with
-  old records, so 34 + 1 + 5 = 40).
-- Per collection, listing costs `ceil(n / 100) + 1` requests (every non-empty page has a cursor,
-  then one empty page ends it). Add 1 `createSession` when anything is old, and
-  `ceil(old / 200)` `applyWrites` per collection.
+- The Workers Free plan allows at most 50 outgoing requests per invocation and has a CPU limit; the
+  specs escalate above 45. A run's requests are the sum over the five kinds of `ceil(n / 100) + 1`
+  listings (`n` is the kind's record count, and an empty kind costs 1), plus 1 `createSession` when
+  any record is old, plus the sum over kinds of `ceil(old / 200)` `applyWrites` (`old` is the
+  kind's old-record count; a kind with no old records adds none). The `+ 1` in a listing is the
+  empty page that ends the walk, since every non-empty page carries a cursor.
+- Today's listings alone are 37: likes 22 (2,056 records), reposts 4 (235), posts 8 (662),
+  threadgate 2 (1) and postgates 1 (0). A day that deletes from three kinds, each within one
+  200-record batch, makes 41 requests: 37 listings, 1 `createSession` and 3 `applyWrites`.
+- The thresholds depend on the posts, the only kind that can outgrow one batch. The other kinds
+  stay at today's 29 listings (likes 22, reposts 4, threadgate 2, postgates 1) with no old records.
+  With `p` posts of which `o` are old:
+  - quiet day (`o = 0`): `30 + ceil(p / 100)` requests. Above 45 from 1,501 posts; above 50 from
+    2,001.
+  - one posts batch (`1 <= o <= 200`): `32 + ceil(p / 100)`. Above 45 from 1,301 posts; above 50
+    from 1,801.
+  - backlog (`o = p`, so `ceil(p / 200)` batches): `31 + ceil(p / 100) + ceil(p / 200)`. Above 45
+    from 901 posts; above 50 from 1,201. At 1,201 posts that is 43 listings, 1 `createSession` and
+    7 `applyWrites`: 51.
+
+  Every post being old is the worst case for a given `p`, so the backlog line is the highest bound.
+- After the post backlog is cleared, only posts under a year old remain. With today's 2,056 likes,
+  235 reposts, 1 threadgate and no postgate (29 listings), 34 listings need 301 to 400 posts left,
+  because those posts cost 5 listings. With all five kinds old and each within one batch, a run
+  makes about 40 requests: 34 listings, 1 `createSession` and 5 `applyWrites`. A kind with more
+  than 200 old records adds `ceil(old / 200) - 1` `applyWrites` for that kind.
+- The listings of all five kinds share the 50-request cap, so the account's size is a limit too.
+  The run order is likes, reposts, posts, threadgate, postgates, so 26 listings (likes 22, reposts
+  4) come before posts. Past 50, the run fails at the request that crosses the cap, and the kinds
+  after it do not run. This is documented, not capped; it is to be revisited in a later slice.
 
 ## Workflow
 

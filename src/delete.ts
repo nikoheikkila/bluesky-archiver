@@ -1,5 +1,5 @@
 import { LIKE_COLLECTION } from "./bluesky";
-import type { Collection, DatedRecord, LikeRecord } from "./domain-types";
+import type { Collection, DatedRecord, LikeRecord, RecordIn } from "./domain-types";
 
 /** applyWrites accepts at most 200 writes per call. */
 const MAX_WRITES_PER_BATCH = 200;
@@ -16,11 +16,18 @@ export function deleteLikes(likes: LikeRecord[], options: DeleteLikesOptions): P
   return deleteRecords(LIKE_COLLECTION, likes, options);
 }
 
-export async function deleteRecords<T extends DatedRecord>(
-  collection: Collection,
-  records: T[],
-  options: DeleteRecordsOptions<T>,
+export async function deleteRecords<C extends Collection>(
+  collection: C,
+  records: RecordIn<C>[],
+  options: DeleteRecordsOptions<RecordIn<C>>,
 ): Promise<void> {
+  const prefix = `at://${options.did}/${collection}/`;
+  for (const record of records) {
+    const rkey = record.uri.startsWith(prefix) ? record.uri.slice(prefix.length) : "";
+    if (rkey === "" || rkey.includes("/")) {
+      throw new Error(`refusing to delete record with unexpected URI ${record.uri}`);
+    }
+  }
   for (let start = 0; start < records.length; start += MAX_WRITES_PER_BATCH) {
     const batch = records.slice(start, start + MAX_WRITES_PER_BATCH);
     await applyDeletes(collection, batch, options);

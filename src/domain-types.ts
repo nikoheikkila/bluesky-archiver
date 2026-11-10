@@ -16,7 +16,7 @@ export type SubjectRecord = LikeRecord | RepostRecord;
 export interface DatedRecordOf<C extends string = string> {
   uri: string;
   cid: string;
-  value: { $type: C; createdAt: string };
+  value: { $type: C; createdAt?: string };
 }
 export type DatedRecord = DatedRecordOf;
 
@@ -25,8 +25,11 @@ export type Collection =
   | "app.bsky.feed.post"
   | "app.bsky.feed.threadgate"
   | "app.bsky.feed.postgate";
-export type RecordIn<C extends Collection> = [C] extends [
-  Exclude<Collection, SubjectRecord["value"]["$type"]>,
-]
-  ? DatedRecordOf<C>
-  : Extract<SubjectRecord, { value: { $type: C } }>;
+export interface RecordByCollection {
+  "app.bsky.feed.like": LikeRecord;
+  "app.bsky.feed.repost": RepostRecord;
+  "app.bsky.feed.post": DatedRecordOf<"app.bsky.feed.post">;
+  "app.bsky.feed.threadgate": DatedRecordOf<"app.bsky.feed.threadgate">;
+  "app.bsky.feed.postgate": DatedRecordOf<"app.bsky.feed.postgate">;
+}
+export type RecordIn<C extends Collection> = RecordByCollection[C];

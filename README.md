@@ -40,8 +40,13 @@ For likes, then reposts, posts, reply settings and quote settings, in that order
    such as `Deleted 3 of 3 reposts older than one year`.
 
 If any request fails, the run stops with an error, and the next day's run deletes the rest. A
-failure in one kind never undoes what the kinds before it already deleted that day. A run sends
-about 41 requests at the current backlog; the Workers Free plan allows 50.
+failure in one kind never undoes what the kinds before it already deleted that day. Each request
+times out after 10 seconds, and a request that takes longer is aborted and counts as a failure.
+Listing all five kinds takes 37 requests in total; a day that deletes from three kinds
+makes about 41, and the Workers Free plan allows 50. The listings of all five kinds share that cap.
+A run exceeds 50 requests from 1,801 posts on a day its deletions fit one batch, and from 1,201
+posts when every post is old, because deleting more than 200 posts takes more than one batch. The
+Request Budget section of AGENTS.md has the formula and the other cases.
 
 ## Requirements
 

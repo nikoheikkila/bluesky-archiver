@@ -1,14 +1,15 @@
 import { type Fetch, LIKE_COLLECTION, listRecords } from "./bluesky";
 import { deleteRecords } from "./delete";
-import type { Collection, SubjectRecord } from "./domain-types";
+import type { Collection, RecordIn } from "./domain-types";
 import { formatDeletionSummary, formatRecordLine, type RecordNoun } from "./report";
 import { selectOldRecords } from "./select";
 import { login } from "./session";
+import { withRequestTimeout } from "./timeout";
 
-const REPOST_COLLECTION: Collection = "app.bsky.feed.repost";
-const POST_COLLECTION: Collection = "app.bsky.feed.post";
-const THREADGATE_COLLECTION: Collection = "app.bsky.feed.threadgate";
-const POSTGATE_COLLECTION: Collection = "app.bsky.feed.postgate";
+const REPOST_COLLECTION = "app.bsky.feed.repost" satisfies Collection;
+const POST_COLLECTION = "app.bsky.feed.post" satisfies Collection;
+const THREADGATE_COLLECTION = "app.bsky.feed.threadgate" satisfies Collection;
+const POSTGATE_COLLECTION = "app.bsky.feed.postgate" satisfies Collection;
 
 export interface Env {
   BLUESKY_DID: string;
@@ -27,11 +28,14 @@ export interface LogEntry {
 
 /**
  * The run's I/O: every request goes through `fetch` and every report line through `log`, at debug
- * for each deleted record and at info for each summary line.
+ * for each deleted record and at info for each summary line. `createWorker` wraps `fetch` so every
+ * request is aborted after `requestTimeoutMs`.
  */
 export interface Dependencies {
   fetch: Fetch;
   log: (entry: LogEntry) => void;
+  /** Per-request timeout in milliseconds; defaults to REQUEST_TIMEOUT_MS, 10 seconds. */
+  requestTimeoutMs?: number;
 }
 
 class OldRecordsCleaner {
@@ -54,7 +58,11 @@ class OldRecordsCleaner {
     await this.clean(POSTGATE_COLLECTION, "quote settings", runStart);
   }
 
-  private async clean(collection: Collection, noun: RecordNoun, runStart: number): Promise<void> {
+  private async clean<C extends Collection>(
+    collection: C,
+    noun: RecordNoun,
+    runStart: number,
+  ): Promise<void> {
     const records = await this.fetchRecords(collection);
     const { old, skipped } = selectOldRecords(records, runStart);
     const deleted = await this.deleteOld(collection, noun, old);
@@ -68,7 +76,7 @@ class OldRecordsCleaner {
     return env.BLUESKY_APP_PASSWORD;
   }
 
-  private fetchRecords(collection: Collection) {
+  private fetchRecords<C extends Collection>(collection: C) {
     return listRecords({
       baseUrl: this.env.BLUESKY_SERVER_URL,
       did: this.env.BLUESKY_DID,
@@ -86,10 +94,10 @@ class OldRecordsCleaner {
     });
   }
 
-  private async deleteOld(
-    collection: Collection,
+  private async deleteOld<C extends Collection>(
+    collection: C,
     noun: RecordNoun,
-    old: SubjectRecord[],
+    old: RecordIn<C>[],
   ): Promise<number> {
     if (old.length === 0) {
       return 0;
@@ -109,7 +117,7 @@ class OldRecordsCleaner {
     return deleted;
   }
 
-  private logDeleted(batch: SubjectRecord[], noun: RecordNoun): number {
+  private logDeleted<C extends Collection>(batch: RecordIn<C>[], noun: RecordNoun): number {
     for (const record of batch) {
       this.deps.log({ level: "debug", message: formatRecordLine(record, noun) });
     }
@@ -125,9 +133,13 @@ class OldRecordsCleaner {
 
 /** Builds the Worker's handlers around the given I/O; `src/index.ts` passes the real ones. */
 export function createWorker(deps: Dependencies) {
+  const timedDeps: Dependencies = {
+    fetch: withRequestTimeout(deps.fetch, deps.requestTimeoutMs),
+    log: deps.log,
+  };
   return {
     async scheduled(controller: { scheduledTime: number }, env: Env): Promise<void> {
-      await new OldRecordsCleaner(env, deps).run(controller.scheduledTime);
+      await new OldRecordsCleaner(env, timedDeps).run(controller.scheduledTime);
     },
   };
 }
