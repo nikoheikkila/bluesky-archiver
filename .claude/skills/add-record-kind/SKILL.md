@@ -5,8 +5,9 @@ description: Checklist for adding a new Bluesky record kind (for example posts) 
 
 # Adding a record kind to the daily run
 
-Likes came first, and reposts were added in the `delete-old-reposts` slice. Posts are next. This
-checklist records what that slice needed, in the order that kept every chunk safe to deploy.
+Likes came first, reposts were added in the `delete-old-reposts` slice, and posts with their reply
+settings and quote settings in the `delete-old-posts` slice. This checklist records what those
+slices needed, in the order that kept every chunk safe to deploy.
 
 ## 1. Measure before specifying
 
@@ -33,8 +34,9 @@ checklist records what that slice needed, in the order that kept every chunk saf
 
 The pipeline is already collection-agnostic. A new kind needs these changes:
 
-- `src/domain-types.d.ts`: add the record type to the `SubjectRecord` union, which extends `Collection`.
-  Records without a `subject` (posts) do not fit `SubjectRecord`, so posts need a wider record type.
+- `src/domain-types.ts`: add the record type to the `SubjectRecord` union, which extends `Collection`.
+  Records without a `subject` do not fit `SubjectRecord`; the posts slice has widened the type, so
+  such a kind only joins `Collection` and is typed as a dated record (see the notes below).
 - `src/report.ts`: extend `RecordNoun`. `formatRecordLine` prints `deleting <noun> <record URI>`
   from the record's own `uri`, so it fits any kind, subject or not.
 - `src/select.ts` (`selectOldRecords`) and `src/delete.ts` (`deleteRecords`) take any collection
@@ -64,11 +66,17 @@ grep -n 'requests' test/scheduled.test.ts
   Constraints on which collections `listRecords` and `applyWrites` may name (wiring cycle).
 - `README.md`: what gets deleted.
 
-## Notes for the posts slice
+## Notes from the posts slice
 
-- Today `app.bsky.feed.post` is forbidden everywhere. The Constraints in `AGENTS.md` exclude it,
-  the fake rejects deleting it, and `test/scheduled.test.ts` asserts that no request names it (the
-  quote-post test). A posts slice must change each of these on purpose.
-- The pinned post must be kept. It is referenced from the profile record (`app.bsky.actor.profile`,
-  `pinnedPost`); confirm against the lexicon in `@bsky/sdk` before relying on it.
-- Replies and quote posts are `app.bsky.feed.post` records too.
+- A kind with no `subject` (posts, threadgates, postgates) needs the record type widened from
+  `SubjectRecord` to a dated record. That is done in `src/bluesky.ts` and `src/domain-types.ts`.
+- The fake must learn the kind's collection, with the same paging as likes, and validate its
+  records against the `@bsky/sdk` lexicon, allowing a missing or malformed `createdAt`.
+- Subject posts that likes and reposts point at belong to another account and must not appear in
+  the account's own listing. Seed the account's own posts through separate harness methods.
+- Settings are judged by their own `createdAt`, not by their post: they can be younger than the
+  post and outlive it, and old settings of a post deleted by hand still go.
+- The contract suites in `test/contract/` must cover listing and deletion of the new kind. Their
+  forbidden-delete case must name a collection no kind uses (it became `app.bsky.actor.profile`).
+- A new kind in the run adds an info line to every run that reaches the end and changes request
+  counts in the tests that pin the whole run. Find them by grep (section 5).

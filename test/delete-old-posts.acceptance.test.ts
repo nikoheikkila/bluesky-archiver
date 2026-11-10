@@ -8,8 +8,7 @@ import { createFakeBluesky, type NewAccountPost } from "./fake-bluesky";
 
 const APP_PASSWORD = "test-app-password";
 
-// Expected to fail until cycle 5 of specs/delete-old-posts.md; remove this marker when the acceptance test passes.
-test.fails("Daily run deletes only posts older than one year, with their reply and quote settings", async () => {
+test("Daily run deletes only posts older than one year, with their reply and quote settings", async () => {
   const runStart = Date.parse("2026-11-08T03:00:00Z");
   const createdBefore = (ms: number) => new Date(runStart - ms).toISOString();
 

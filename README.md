@@ -1,9 +1,9 @@
 # Bluesky Archiver
 
 A Cloudflare Worker that prunes old activity from one Bluesky account (`nikoheikkila.fi`). Every
-day at 03:00 UTC it permanently deletes the account's likes and reposts that are more than one
-year old. This limits the public exposure of past activity and reduces the risk of online
-harassment.
+day at 03:00 UTC it permanently deletes the account's likes, reposts, posts, reply settings and
+quote settings that are more than one year old. This limits the public exposure of past activity
+and reduces the risk of online harassment.
 
 ## What gets deleted
 
@@ -11,30 +11,37 @@ harassment.
 | ------------------------------------------------------------------------------ | ----------------------------- |
 | Likes (`app.bsky.feed.like`)                                                   | Yes, when older than one year |
 | Reposts (`app.bsky.feed.repost`), including reposts of the account's own posts | Yes, when older than one year |
-| Posts, replies and quote posts (`app.bsky.feed.post`)                          | Not yet; planned              |
+| Posts, including replies and quote posts (`app.bsky.feed.post`)                | Yes, when older than one year |
+| Reply settings (`app.bsky.feed.threadgate`: who can reply, hidden replies)     | Yes, when older than one year |
+| Quote settings (`app.bsky.feed.postgate`: who can quote, detached quotes)      | Yes, when older than one year |
 
 - **Older than one year** means the record's own `createdAt` is more than 365 × 24 hours before the
   run starts, in UTC. A like or repost of a post that has since been deleted is judged by its own
-  date too.
+  date too, and so are a post's reply settings and quote settings: they can outlive their post by
+  the gap between the two creation times.
 - A record with a missing or unreadable `createdAt` is never deleted.
 - Deletion is permanent. Nothing is archived, and there is no dry-run mode or off switch. Copies
   that other services already received through the Bluesky firehose stay where they are.
+- Other people's replies to and quotes of a deleted post stay and point at a post that no longer
+  exists. Media files of deleted posts are left to the server to clean up.
+- The pinned post is not yet protected: a pinned post older than one year is deleted. Protecting it
+  is the next slice, due before 2027-08-15.
 
 ## How a run works
 
-For likes first, then reposts, the Worker:
+For likes, then reposts, posts, reply settings and quote settings, in that order, the Worker:
 
 1. lists every record of the collection through the public `com.atproto.repo.listRecords`
    endpoint;
 2. picks the records older than one year, oldest first;
 3. logs in with an app password, at most once per run and only when something is old;
 4. deletes them with `com.atproto.repo.applyWrites`, at most 200 per request;
-5. logs one line per deleted record (`<createdAt> <URI of the liked or reposted post>`), then a
-   total such as `Deleted 3 of 3 reposts older than one year`.
+5. logs one line per deleted record (`deleting <kind> <URI of the deleted record>`), then a total
+   such as `Deleted 3 of 3 reposts older than one year`.
 
 If any request fails, the run stops with an error, and the next day's run deletes the rest. A
-failure while deleting reposts never undoes that day's likes. A run sends about 31 requests at the
-current backlog; the Workers Free plan allows 50.
+failure in one kind never undoes what the kinds before it already deleted that day. A run sends
+about 41 requests at the current backlog; the Workers Free plan allows 50.
 
 ## Requirements
 

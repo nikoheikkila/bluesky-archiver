@@ -6,6 +6,9 @@ import { selectOldRecords } from "./select";
 import { login } from "./session";
 
 const REPOST_COLLECTION: Collection = "app.bsky.feed.repost";
+const POST_COLLECTION: Collection = "app.bsky.feed.post";
+const THREADGATE_COLLECTION: Collection = "app.bsky.feed.threadgate";
+const POSTGATE_COLLECTION: Collection = "app.bsky.feed.postgate";
 
 export interface Env {
   BLUESKY_DID: string;
@@ -46,6 +49,9 @@ class OldRecordsCleaner {
   async run(runStart: number): Promise<void> {
     await this.clean(LIKE_COLLECTION, "like", runStart);
     await this.clean(REPOST_COLLECTION, "repost", runStart);
+    await this.clean(POST_COLLECTION, "post", runStart);
+    await this.clean(THREADGATE_COLLECTION, "reply settings", runStart);
+    await this.clean(POSTGATE_COLLECTION, "quote settings", runStart);
   }
 
   private async clean(collection: Collection, noun: RecordNoun, runStart: number): Promise<void> {

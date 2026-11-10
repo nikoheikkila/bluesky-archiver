@@ -2,7 +2,7 @@
 // Cycle 3: delete likes in batches.
 import { expect, test } from "vitest";
 import { deleteLikes, deleteRecords } from "../src/delete";
-import type { Collection, LikeRecord, SubjectRecord } from "../src/domain-types";
+import type { Collection, DatedRecord, LikeRecord, SubjectRecord } from "../src/domain-types";
 import { login } from "../src/session";
 import { createFakeBluesky, type NewLike } from "./fake-bluesky";
 
@@ -180,4 +180,43 @@ test("accepts an applyWrites response without a body", async () => {
   ).resolves.toBeUndefined();
 
   expect(reported).toStrictEqual([[oneLike()]]);
+});
+
+test("deletes 450 posts in batches of 200, 200 and 50, all in the post collection", async () => {
+  const bluesky = createFakeBluesky({ did: DID, baseUrl: BASE_URL, appPassword: APP_PASSWORD });
+  const posts = seeds(450).map(({ createdAt }, index) =>
+    bluesky.addAccountPost({ kind: "plain", text: `post ${index}`, createdAt }),
+  );
+  const records: DatedRecord[] = posts.map(({ uri, createdAt }) => ({
+    uri,
+    cid: CID,
+    value: { $type: "app.bsky.feed.post", createdAt },
+  }));
+  const session = await login({
+    baseUrl: BASE_URL,
+    did: DID,
+    password: APP_PASSWORD,
+    fetch: bluesky.fetch,
+  });
+
+  await deleteRecords("app.bsky.feed.post", records, {
+    did: DID,
+    fetchHandler: session.fetchHandler,
+    onBatchDeleted: () => {},
+  });
+
+  expect(bluesky.receivedWrites().map((writes) => writes.length)).toStrictEqual([200, 200, 50]);
+  expect(
+    bluesky
+      .receivedWrites()
+      .flat()
+      .map((write) => write.collection),
+  ).toStrictEqual(Array(450).fill("app.bsky.feed.post"));
+  expect(
+    bluesky
+      .receivedWrites()
+      .flat()
+      .map((write) => write.rkey),
+  ).toStrictEqual(records.map(rkeyOf));
+  expect(bluesky.accountPosts()).toStrictEqual([]);
 });

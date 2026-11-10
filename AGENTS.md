@@ -7,10 +7,12 @@ architecture, the constraints, and the pitfalls learned in earlier sessions.
 
 A Cloudflare Worker (TypeScript, Wrangler) that runs daily at 03:00 UTC against one Bluesky account
 (DID and server URL are Wrangler `vars` in `wrangler.jsonc`). Each run permanently deletes the
-account's likes and reposts that are older than one year (the age rule is under
-[Constraints](#constraints)). There is no mode or flag that turns deletion off. Reposts are direct
-`app.bsky.feed.repost` records only. Posts (including quote posts) are not touched yet. Later
-slices add the posts.
+account's likes, reposts, posts (plain posts, replies and quote posts), reply settings
+(`app.bsky.feed.threadgate`) and quote settings (`app.bsky.feed.postgate`) that are older than one
+year (the age rule is under [Constraints](#constraints)). There is no mode or flag that turns
+deletion off. Reposts are direct `app.bsky.feed.repost` records only. The pinned post is not yet
+protected: a pinned post older than one year is deleted. Protecting it is the next slice, due before
+2027-08-15, when the current pinned post turns old.
 
 ## Commands
 
@@ -83,21 +85,26 @@ kill as equivalent with a one-line argument rather than forcing a brittle test.
 The pipeline per kind is `listRecords → selectOldRecords → login (createSession) → deleteRecords
 (applyWrites) → formatRecordLine / formatDeletionSummary → log`, built by `createWorker()` in
 `src/worker.ts` and bound to the real `fetch` and `console` in `src/index.ts`. The kinds run in
-order in one invocation: likes (`app.bsky.feed.like`) first, then reposts
-(`app.bsky.feed.repost`). Login happens at most once, and only when something is old. A kind with
+order in one invocation: likes (`app.bsky.feed.like`), reposts (`app.bsky.feed.repost`), posts
+(`app.bsky.feed.post`), reply settings (`app.bsky.feed.threadgate`) and quote settings
+(`app.bsky.feed.postgate`). Login happens at most once, and only when something is old. A kind with
 no old records skips deletion. After each batch succeeds, one
 `debug` line (`deleting <noun> <record URI>`) is logged per deleted record; the `info` summary
 lines for the kind follow. Any non-OK response throws, so the run fails without a summary line for
-that kind, and a failed likes request stops the run before any repost request.
+that kind, and a failed request in one kind stops the run before any request of the kinds after it.
 
 - `src/bluesky.ts` — `listRecords({ baseUrl, did, collection, fetch })` pages through the public
   `com.atproto.repo.listRecords` endpoint for any collection (`limit=100`) until an empty page or a
   missing cursor. It scans every page, because record order follows record keys, not `createdAt`.
   `LIKE_COLLECTION` names the likes collection, and `listLikes()` is a thin wrapper over
-  `listRecords` for it. It also exports the `Fetch` type every request goes through.
-- `src/domain-types.d.ts` — type-only, emits nothing at runtime: the Bluesky lexicon record types
-  (`LikeRecord`, `RepostRecord`, `SubjectRecord`, `DatedRecordOf`, `DatedRecord`, `Collection`,
-  `RecordIn`). Modules import them with `import type`.
+  `listRecords` for it. Likes and reposts come back as subject records; posts, reply settings and
+  quote settings have no `subject`, so they come back as any dated record (`RecordIn<C>`). It also
+  exports the `Fetch` type every request goes through.
+- `src/domain-types.ts` — type-only, emits nothing at runtime: the Bluesky lexicon record types
+  (`SubjectRecordOf`, `LikeRecord`, `RepostRecord`, `SubjectRecord`, `DatedRecordOf`, `DatedRecord`,
+  `Collection`, `RecordIn`). A subject record is a like or repost; a dated record is any record
+  with a `createdAt`, which also covers posts, reply settings and quote settings. Modules import
+  them with `import type`.
 - `src/select.ts` — `selectOldRecords(records, runStart)` holds the one age rule and returns the
   old records oldest first. A record with a missing or unparseable `createdAt` is counted as
   skipped. `selectOldLikes` is a thin wrapper over it.
@@ -106,8 +113,9 @@ that kind, and a failed likes request stops the run before any repost request.
 - `src/delete.ts` — `deleteRecords()` batches `com.atproto.repo.applyWrites` deletes for any
   collection, at most 200 per call. `deleteLikes()` is a thin wrapper over it.
 - `src/report.ts` — `formatRecordLine()`, `formatLikeLine()` and `formatDeletionSummary()`, whose
-  noun is "like" or "repost". `formatRecordLine(record, noun)` prints the URI of the like or repost
-  record itself, not its subject. Wording is fixed by the spec.
+  noun is "like", "repost", "post", "reply settings" or "quote settings". The settings nouns never
+  change form. `formatRecordLine(record, noun)` prints the URI of the deleted record itself, not its
+  subject or its post. Wording is fixed by the spec.
 - `src/worker.ts` — `createWorker({ fetch, log })` returns the handlers object with `scheduled`.
   It reads the `BLUESKY_APP_PASSWORD` secret and fails before listing when it is missing. Every
   request goes through the injected `fetch` and every report line through the injected `log` as a
@@ -149,18 +157,19 @@ init), log: ({ level, message }) => writers[level](message) })`, where `writers`
 - Subject posts from `addPost()` belong to another account and never appear in the account's post
   listing. The test harness can delete them with `deletePost()` (likes and reposts remain, as on
   the real server).
-- `addQuotePost()` and `quotePosts()` remain for the existing quote-post tests. Their quote posts
-  are not listed.
+- Quote posts are account posts with an `app.bsky.embed.record` or `app.bsky.embed.recordWithMedia`
+  embed, seeded with `addAccountPost()`. `listRecords` lists them like the other account posts.
 - **The fake must behave like the real server.** Every collection pages the same way: every
   non-empty page carries a cursor, even the last partial one, and paging ends on an empty page
   without a cursor. `test/contract/` holds the shared contract suites (`list-records.contract.ts`
   and `write.contract.ts`), run against the fake by `test/contract/fake.test.ts` in the default
   suite. Change the fake only together with its contract.
 - Tests fix the run start explicitly so they pass at any wall-clock time.
-- `test/delete-old-likes.acceptance.test.ts` and `test/delete-old-reposts.acceptance.test.ts` drive
-  the Worker's `scheduled` entry point, built by `createWorker` with the fake's `fetch` and a log
-  collector, for the scenarios in `feature/delete-old-likes.feature` and
-  `feature/delete-old-reposts.feature`.
+- `test/delete-old-likes.acceptance.test.ts`, `test/delete-old-reposts.acceptance.test.ts` and
+  `test/delete-old-posts.acceptance.test.ts` drive the Worker's `scheduled` entry point, built by
+  `createWorker` with the fake's `fetch` and a log collector, for the scenarios in
+  `feature/delete-old-likes.feature`, `feature/delete-old-reposts.feature` and
+  `feature/delete-old-posts.feature`.
 - `vitest.config.mts` runs every file in one workerd runtime (`maxWorkers: 1`, `isolate: false`) and
   pre-bundles `@bsky/sdk/lexicons` with the dep optimizer. That cut the suite from ~4 s to ~0.75 s,
   because isolated files each started a runtime and re-imported the lexicons. Sharing is safe only
@@ -171,13 +180,15 @@ init), log: ({ level, message }) => writers[level](message) })`, where `writers`
 ### Lexicon Validation and Deliberately Invalid Fixtures
 
 - The fake validates every request and response against the official lexicons shipped in
-  `@bsky/sdk`. Every like and repost record it serves, and every quote post it stores, is validated
-  against its record lexicon. Quote posts are validated in full, `createdAt` included, when stored.
-- Like and repost records it serves may lack `createdAt` or carry a malformed one, because
-  undatable records exist on the real server when they are written without validation. Every other
-  field is still checked. Undatable likes and reposts must stay servable, because the age rule
-  never deletes them and tests prove it. Before tightening a check in the fake, grep for fixtures
-  that are invalid on purpose: `grep -rn 'not-a-date\|createdAt: ""' test/`.
+  `@bsky/sdk`. Every record it serves (likes, reposts, posts, reply settings and quote settings) is
+  validated against its record lexicon. `addAccountPost()` validates the post it stores against the
+  `app.bsky.feed.post` lexicon with a fixed `createdAt`, so a stored account post's `createdAt` is
+  not checked, as for served records, and undatable posts can be seeded.
+- Records it serves may lack `createdAt` or carry a malformed one, because undatable records exist
+  on the real server when they are written without validation. Every other field is still checked.
+  Undatable records of every kind must stay servable, because the age rule never deletes them and
+  tests prove it. Before tightening a check in the fake, grep for fixtures that are invalid on
+  purpose: `grep -rn 'not-a-date\|createdAt: ""' test/`.
 - The harness types `NewLike` and `NewRepost` (exported by the fake) require `createdAt`. Tests add
   a record without one through a cast (`{ subject } as unknown as NewRepost`), as in
   `test/contract/fake.test.ts`.
@@ -201,7 +212,7 @@ init), log: ({ level, message }) => writers[level](message) })`, where `writers`
 
 ### Tests That Pin the Whole Run
 
-- Both acceptance tests and most of `test/scheduled.test.ts` assert the complete log
+- All three acceptance tests and most of `test/scheduled.test.ts` assert the complete log
   (`toStrictEqual` over every entry, level included) and exact request sequences or counts. Adding
   a kind to the run appends an info `No <kind>s are older than one year` entry to every run that
   reaches the end, and adds that kind's listing requests to every request count.
@@ -212,10 +223,11 @@ init), log: ({ level, message }) => writers[level](message) })`, where `writers`
 
 ## Constraints
 
-- The Worker sends only `GET listRecords` (for `app.bsky.feed.like` and `app.bsky.feed.repost`),
-  `POST createSession` and `POST applyWrites`. `applyWrites` carries deletes of `app.bsky.feed.like`
-  and `app.bsky.feed.repost` records only, never one collection mixed with another and never
-  `app.bsky.feed.post`. It never calls `deleteSession`.
+- The Worker sends only `GET listRecords` (for `app.bsky.feed.like`, `app.bsky.feed.repost`,
+  `app.bsky.feed.post`, `app.bsky.feed.threadgate` and `app.bsky.feed.postgate`),
+  `POST createSession` and `POST applyWrites`. `applyWrites` carries deletes of those five
+  collections only, one collection per batch and never mixed. It never deletes
+  `app.bsky.actor.profile`, follows, blocks or lists, and it never calls `deleteSession`.
 - The age rule is a global invariant and applies to every record kind the Worker deletes. A record
   is older than one year when its own `createdAt` is strictly more than 365 × 24 h before the run
   starts; the run start is `controller.scheduledTime`, and the comparison is in UTC. A record whose
@@ -238,8 +250,11 @@ init), log: ({ level, message }) => writers[level](message) })`, where `writers`
 
 ### Request Budget
 
-- The Workers Free plan allows at most 50 outgoing requests per invocation and has a CPU limit. A
-  run uses about 31 requests at the current backlog, and the specs escalate above 45.
+- The Workers Free plan allows at most 50 outgoing requests per invocation and has a CPU limit. At
+  today's numbers a run makes 41 requests (37 listings, 1 `createSession`, 3 `applyWrites`), under
+  the 50 limit and the 45 point where the specs escalate. After the post backlog is cleared, a run
+  makes at most about 40 (34 listings, 1 login, up to one batch per kind across the five kinds with
+  old records, so 34 + 1 + 5 = 40).
 - Per collection, listing costs `ceil(n / 100) + 1` requests (every non-empty page has a cursor,
   then one empty page ends it). Add 1 `createSession` when anything is old, and
   `ceil(old / 200)` `applyWrites` per collection.
@@ -250,5 +265,5 @@ Work is spec-driven with the agentic-cd plugin (`/specify`, `/start-session`, `/
 `/end-session`). Specs live in `specs/<slug>.md`, which is **gitignored on purpose**: never commit
 or force-add it. Feature files in `feature/` are tracked. Each spec has one Gherkin scenario
 (the acceptance test) and a plan of TDD cycles; commits use Conventional Commits (`feat:`, `fix:`,
-`docs(spec):`). Adding a record kind (posts are next) follows
+`docs(spec):`). Adding a record kind follows
 `.claude/skills/add-record-kind/SKILL.md`.

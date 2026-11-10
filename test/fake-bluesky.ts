@@ -38,12 +38,6 @@ export interface FakeWrite {
   rkey?: string;
 }
 
-export interface FakeQuotePost {
-  uri: string;
-  quoted: string;
-  createdAt: string;
-}
-
 /** A post of the account itself; posts that likes and reposts point at belong to another account. */
 export type NewAccountPost =
   | { kind: "plain"; text: string; createdAt: string }
@@ -84,8 +78,6 @@ export interface FakeBluesky {
   addRepost(repost: NewRepost): FakeRepost;
   /** Adds the reposts in order, as consecutive addRepost calls would. */
   addReposts(reposts: NewRepost[]): FakeRepost[];
-  addQuotePost(quote: { quoted: string; createdAt: string }): FakeQuotePost;
-  quotePosts(): FakeQuotePost[];
   reposts(): FakeRepost[];
   posts(): FakePost[];
   /** Seeds the account's own posts and settings, served by listRecords and deletable by applyWrites. */
@@ -109,7 +101,6 @@ export function createFakeBluesky(options: FakeBlueskyOptions): FakeBluesky {
   const stored: FakeLike[] = [];
   const storedReposts: FakeRepost[] = [];
   const storedPosts: FakePost[] = [];
-  const storedQuotes: FakeQuotePost[] = [];
   const storedAccountPosts: FakeAccountPost[] = [];
   const storedReplySettings: FakePostSettings[] = [];
   const storedQuoteSettings: FakePostSettings[] = [];
@@ -206,22 +197,6 @@ export function createFakeBluesky(options: FakeBlueskyOptions): FakeBluesky {
     addRepost,
     addReposts: (reposts) => reposts.map(addRepost),
     reposts: () => storedReposts,
-    addQuotePost: (quote) => {
-      app.bsky.feed.post.$assert({
-        $type: "app.bsky.feed.post",
-        text: "",
-        embed: { $type: "app.bsky.embed.record", record: { uri: quote.quoted, cid: CID } },
-        createdAt: quote.createdAt,
-      });
-      const created = {
-        uri: nextUri("app.bsky.feed.post"),
-        quoted: quote.quoted,
-        createdAt: quote.createdAt,
-      };
-      storedQuotes.push(created);
-      return created;
-    },
-    quotePosts: () => storedQuotes,
     posts: () => storedPosts,
     addAccountPost: (post) => {
       app.bsky.feed.post.$assert({

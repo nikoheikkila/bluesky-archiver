@@ -1,7 +1,7 @@
 // Feature: feature/delete-old-likes.feature
 // Cycle 4: pick the likes older than one year.
 import { expect, test } from "vitest";
-import type { LikeRecord, RepostRecord } from "../src/domain-types";
+import type { DatedRecord, LikeRecord, RepostRecord } from "../src/domain-types";
 import { selectOldLikes, selectOldRecords } from "../src/select";
 import { DAY, HOUR, YEAR } from "./constants";
 
@@ -120,4 +120,26 @@ test("skips and never selects a like that has no value", () => {
 
   expect(result.old).toStrictEqual([]);
   expect(result.skipped).toBe(1);
+});
+
+function postCreatedAt(id: string, createdAt: string): DatedRecord {
+  return {
+    uri: `at://did:plc:fakeaccount000000000000/app.bsky.feed.post/${id}`,
+    cid: `post-cid-${id}`,
+    value: { $type: "app.bsky.feed.post", createdAt },
+  };
+}
+
+test("selects the posts older than one year, oldest first, whatever their kind", () => {
+  const runStart = Date.parse("2026-11-08T03:00:00Z");
+  const ago = (ms: number) => new Date(runStart - ms).toISOString();
+  const elections = postCreatedAt("elections", ago(2 * YEAR));
+  const reply = postCreatedAt("reply", ago(400 * DAY));
+  const quote = postCreatedAt("quote", ago(YEAR + HOUR));
+  const post = postCreatedAt("post", ago(YEAR - HOUR));
+  const recentReply = postCreatedAt("recent-reply", ago(DAY));
+
+  const result = selectOldRecords([recentReply, quote, elections, post, reply], runStart);
+
+  expect(result.old).toStrictEqual([elections, reply, quote]);
 });

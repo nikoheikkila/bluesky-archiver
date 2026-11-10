@@ -57,6 +57,9 @@ test("Daily run deletes only reposts older than one year", async () => {
     { level: "debug", message: `deleting repost ${deletedRepost.uri}` },
     { level: "debug", message: `deleting repost ${footballRepost.uri}` },
     { level: "info", message: "Deleted 3 of 3 reposts older than one year" },
+    { level: "info", message: "No posts are older than one year" },
+    { level: "info", message: "No reply settings are older than one year" },
+    { level: "info", message: "No quote settings are older than one year" },
   ]);
   expect(bluesky.reposts().map((repost) => repost.subject)).toStrictEqual([cooking.uri, music.uri]);
 });
