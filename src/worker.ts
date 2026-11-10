@@ -1,11 +1,6 @@
-import {
-  type Collection,
-  type Fetch,
-  LIKE_COLLECTION,
-  listRecords,
-  type SubjectRecord,
-} from "./bluesky";
+import { type Fetch, LIKE_COLLECTION, listRecords } from "./bluesky";
 import { deleteRecords } from "./delete";
+import type { Collection, SubjectRecord } from "./domain-types";
 import { formatDeletionSummary, formatRecordLine, type RecordNoun } from "./report";
 import { selectOldRecords } from "./select";
 import { login } from "./session";

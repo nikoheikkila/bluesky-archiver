@@ -1,7 +1,7 @@
 // Feature: feature/delete-old-likes.feature
 // Cycle 5: format the report.
 import { expect, test } from "vitest";
-import type { DatedRecordOf, LikeRecord, RepostRecord } from "../src/bluesky";
+import type { DatedRecordOf, LikeRecord, RepostRecord } from "../src/domain-types";
 import { formatDeletionSummary, formatLikeLine, formatRecordLine } from "../src/report";
 
 function like(id: string, createdAt: string): LikeRecord {

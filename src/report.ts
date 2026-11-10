@@ -1,4 +1,4 @@
-import type { DatedRecord } from "./bluesky";
+import type { DatedRecord } from "./domain-types";
 
 export interface DeletionSummary {
   found: number;

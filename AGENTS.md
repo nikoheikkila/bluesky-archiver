@@ -95,6 +95,9 @@ that kind, and a failed likes request stops the run before any repost request.
   missing cursor. It scans every page, because record order follows record keys, not `createdAt`.
   `LIKE_COLLECTION` names the likes collection, and `listLikes()` is a thin wrapper over
   `listRecords` for it. It also exports the `Fetch` type every request goes through.
+- `src/domain-types.d.ts` — type-only, emits nothing at runtime: the Bluesky lexicon record types
+  (`LikeRecord`, `RepostRecord`, `SubjectRecord`, `DatedRecordOf`, `DatedRecord`, `Collection`,
+  `RecordIn`). Modules import them with `import type`.
 - `src/select.ts` — `selectOldRecords(records, runStart)` holds the one age rule and returns the
   old records oldest first. A record with a missing or unparseable `createdAt` is counted as
   skipped. `selectOldLikes` is a thin wrapper over it.

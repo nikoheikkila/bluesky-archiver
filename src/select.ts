@@ -1,4 +1,4 @@
-import type { DatedRecord, LikeRecord } from "./bluesky";
+import type { DatedRecord, LikeRecord } from "./domain-types";
 
 export interface Selection<T extends DatedRecord = LikeRecord> {
   old: T[];

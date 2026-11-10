@@ -3,11 +3,9 @@
 import { createScheduledController, env } from "cloudflare:test";
 import { expect, test } from "vitest";
 import { createWorker, type LogEntry } from "../src/worker";
+import { DAY, HOUR, YEAR } from "./constants";
 import { createFakeBluesky } from "./fake-bluesky";
 
-const HOUR = 60 * 60 * 1000;
-const DAY = 24 * HOUR;
-const YEAR = 365 * DAY;
 const APP_PASSWORD = "test-app-password";
 
 test("Daily run deletes only likes older than one year", async () => {

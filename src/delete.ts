@@ -1,4 +1,5 @@
-import { type Collection, type DatedRecord, LIKE_COLLECTION, type LikeRecord } from "./bluesky";
+import { LIKE_COLLECTION } from "./bluesky";
+import type { Collection, DatedRecord, LikeRecord } from "./domain-types";
 
 /** applyWrites accepts at most 200 writes per call. */
 const MAX_WRITES_PER_BATCH = 200;

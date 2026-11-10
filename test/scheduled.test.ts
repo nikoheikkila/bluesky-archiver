@@ -3,11 +3,10 @@
 import { createScheduledController, env } from "cloudflare:test";
 import { expect, test } from "vitest";
 import { createWorker, type LogEntry } from "../src/worker";
+import { DAY, HOUR } from "./constants";
 import { createFakeBluesky, type FakeBluesky, type NewRepost } from "./fake-bluesky";
 
 const RUN_START = Date.parse("2026-11-08T03:00:00Z");
-const HOUR = 60 * 60 * 1000;
-const DAY = 24 * HOUR;
 const APP_PASSWORD = "test-app-password";
 const WRONG_PASSWORD = "wrong-app-password";
 const NO_OLD_LIKES = "No likes are older than one year";

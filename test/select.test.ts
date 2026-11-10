@@ -1,12 +1,9 @@
 // Feature: feature/delete-old-likes.feature
 // Cycle 4: pick the likes older than one year.
 import { expect, test } from "vitest";
-import type { LikeRecord, RepostRecord } from "../src/bluesky";
+import type { LikeRecord, RepostRecord } from "../src/domain-types";
 import { selectOldLikes, selectOldRecords } from "../src/select";
-
-const DAY = 24 * 60 * 60 * 1000;
-const HOUR = 60 * 60 * 1000;
-const YEAR = 365 * DAY;
+import { DAY, HOUR, YEAR } from "./constants";
 
 function likeCreatedAt(id: string, createdAt: string): LikeRecord {
   const uri = `at://did:plc:fakeaccount000000000000/app.bsky.feed.like/${id}`;

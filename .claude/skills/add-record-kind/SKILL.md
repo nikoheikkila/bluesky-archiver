@@ -33,7 +33,7 @@ checklist records what that slice needed, in the order that kept every chunk saf
 
 The pipeline is already collection-agnostic. A new kind needs these changes:
 
-- `src/bluesky.ts`: add the record type to the `SubjectRecord` union, which extends `Collection`.
+- `src/domain-types.d.ts`: add the record type to the `SubjectRecord` union, which extends `Collection`.
   Records without a `subject` (posts) do not fit `SubjectRecord`, so posts need a wider record type.
 - `src/report.ts`: extend `RecordNoun`. `formatRecordLine` prints `deleting <noun> <record URI>`
   from the record's own `uri`, so it fits any kind, subject or not.

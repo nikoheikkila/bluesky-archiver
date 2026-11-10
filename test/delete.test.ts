@@ -1,8 +1,8 @@
 // Feature: feature/delete-old-likes.feature
 // Cycle 3: delete likes in batches.
 import { expect, test } from "vitest";
-import type { Collection, LikeRecord, SubjectRecord } from "../src/bluesky";
 import { deleteLikes, deleteRecords } from "../src/delete";
+import type { Collection, LikeRecord, SubjectRecord } from "../src/domain-types";
 import { login } from "../src/session";
 import { createFakeBluesky, type NewLike } from "./fake-bluesky";
 
