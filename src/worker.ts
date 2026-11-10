@@ -1,6 +1,7 @@
 import { type Fetch, LIKE_COLLECTION, listRecords } from "./bluesky";
 import { deleteRecords } from "./delete";
 import type { Collection, RecordIn } from "./domain-types";
+import { readPinnedPost, withoutPinnedPost } from "./profile";
 import { formatDeletionSummary, formatRecordLine, type RecordNoun } from "./report";
 import { selectOldRecords } from "./select";
 import { login } from "./session";
@@ -51,9 +52,10 @@ class OldRecordsCleaner {
   private session?: Awaited<ReturnType<typeof login>>;
 
   async run(runStart: number): Promise<void> {
+    const pinnedUri = await this.pinnedPostUri();
     await this.clean(LIKE_COLLECTION, "like", runStart);
     await this.clean(REPOST_COLLECTION, "repost", runStart);
-    await this.clean(POST_COLLECTION, "post", runStart);
+    await this.clean(POST_COLLECTION, "post", runStart, pinnedUri);
     await this.clean(THREADGATE_COLLECTION, "reply settings", runStart);
     await this.clean(POSTGATE_COLLECTION, "quote settings", runStart);
   }
@@ -62,8 +64,9 @@ class OldRecordsCleaner {
     collection: C,
     noun: RecordNoun,
     runStart: number,
+    pinnedUri?: string,
   ): Promise<void> {
-    const records = await this.fetchRecords(collection);
+    const records = withoutPinnedPost(await this.fetchRecords(collection), pinnedUri);
     const { old, skipped } = selectOldRecords(records, runStart);
     const deleted = await this.deleteOld(collection, noun, old);
     this.report({ found: old.length, deleted, skipped }, noun);
@@ -81,6 +84,14 @@ class OldRecordsCleaner {
       baseUrl: this.env.BLUESKY_SERVER_URL,
       did: this.env.BLUESKY_DID,
       collection,
+      fetch: this.deps.fetch,
+    });
+  }
+
+  private pinnedPostUri() {
+    return readPinnedPost({
+      baseUrl: this.env.BLUESKY_SERVER_URL,
+      did: this.env.BLUESKY_DID,
       fetch: this.deps.fetch,
     });
   }

@@ -48,11 +48,15 @@ function newBluesky() {
  * One scheduled run against the fake, with the app password it is given; `entries` collects its
  * log with levels, and `lines` the same log's messages only.
  */
-function newRun(bluesky: FakeBluesky, password: string | undefined) {
+function newRun(
+  bluesky: FakeBluesky,
+  password: string | undefined,
+  fetch: typeof bluesky.fetch = bluesky.fetch,
+) {
   const entries: LogEntry[] = [];
   const lines: string[] = [];
   const worker = createWorker({
-    fetch: bluesky.fetch,
+    fetch,
     log: (entry) => {
       entries.push(entry);
       lines.push(entry.message);
@@ -82,6 +86,34 @@ const listedCollections = (bluesky: FakeBluesky) =>
   requestsTo(bluesky, "com.atproto.repo.listRecords").map((request) =>
     new URL(request.url).searchParams.get("collection"),
   );
+
+test.each([500, 400])(
+  "fails before any other request, logs nothing and deletes nothing when reading the profile fails with HTTP %i",
+  async (status) => {
+    const bluesky = newBluesky();
+    const subject = bluesky.addPost("a post");
+    const createdAt = createdAgo(400 * DAY);
+    const like = bluesky.addLike({ subject: subject.uri, createdAt });
+    const repost = bluesky.addRepost({ subject: subject.uri, createdAt });
+    const post = bluesky.addAccountPost({ kind: "plain", text: "an old account post", createdAt });
+    const replySettings = bluesky.addReplySettings({ post, createdAt });
+    const quoteSettings = bluesky.addQuoteSettings({ post, createdAt });
+    bluesky.failProfileRead({ status });
+    const { entries, run } = newRun(bluesky, APP_PASSWORD);
+
+    await expect(run()).rejects.toThrow();
+
+    expect(
+      bluesky.requests().map(({ method, url }) => [method, new URL(url).pathname]),
+    ).toStrictEqual([["GET", "/xrpc/com.atproto.repo.getRecord"]]);
+    expect(entries).toStrictEqual([]);
+    expect(bluesky.likes()).toStrictEqual([like]);
+    expect(bluesky.reposts()).toStrictEqual([repost]);
+    expect(bluesky.accountPosts()).toStrictEqual([post]);
+    expect(bluesky.replySettings()).toStrictEqual([replySettings]);
+    expect(bluesky.quoteSettings()).toStrictEqual([quoteSettings]);
+  },
+);
 
 test("fails loudly and logs no total when listing a page fails", async () => {
   const bluesky = createFakeBluesky({ did: env.BLUESKY_DID, baseUrl: env.BLUESKY_SERVER_URL });
@@ -134,10 +166,10 @@ test("reports nothing old after one listing request per collection when the acco
     "app.bsky.feed.threadgate",
     "app.bsky.feed.postgate",
   ]);
-  expect(bluesky.requests()).toHaveLength(5);
+  expect(bluesky.requests()).toHaveLength(6);
 });
 
-test("stays within 41 requests when deleting 2 old likes out of 2,056 and 326 old posts out of 662", async () => {
+test("stays within 42 requests when deleting 2 old likes out of 2,056 and 326 old posts out of 662", async () => {
   const bluesky = newBluesky();
   const post = bluesky.addPost("a post");
   const old = { subject: post.uri, createdAt: createdAgo(400 * DAY) };
@@ -161,7 +193,7 @@ test("stays within 41 requests when deleting 2 old likes out of 2,056 and 326 ol
   expect(requestsTo(bluesky, "com.atproto.repo.listRecords")).toHaveLength(37);
   expect(requestsTo(bluesky, "com.atproto.server.createSession")).toHaveLength(1);
   expect(requestsTo(bluesky, "com.atproto.repo.applyWrites")).toHaveLength(3);
-  expect(bluesky.requests()).toHaveLength(41);
+  expect(bluesky.requests()).toHaveLength(42);
 });
 
 test("keeps the deleted likes logged after a failed batch and deletes the rest on the next run", async () => {
@@ -269,6 +301,7 @@ test("deletes old likes before listing reposts, then old reposts, with a single 
   await expect(run()).resolves.toBeUndefined();
 
   expect(requestPhases(bluesky)).toStrictEqual([
+    "repo.getRecord",
     "listRecords app.bsky.feed.like",
     "server.createSession",
     "repo.applyWrites",
@@ -323,6 +356,7 @@ test("logs in after listing reposts when only a repost is older than one year", 
   await expect(run()).resolves.toBeUndefined();
 
   expect(requestPhases(bluesky)).toStrictEqual([
+    "repo.getRecord",
     "listRecords app.bsky.feed.like",
     "listRecords app.bsky.feed.repost",
     "server.createSession",
@@ -485,11 +519,21 @@ test("runs every kind in order after one login when one record of each is older 
   const post = bluesky.addAccountPost({ kind: "plain", text: "an account post", createdAt });
   bluesky.addReplySettings({ post, createdAt });
   bluesky.addQuoteSettings({ post, createdAt });
-  const { run } = newRun(bluesky, APP_PASSWORD);
+  const authorizations: { path: string; authorization: string | null }[] = [];
+  const recordingFetch: typeof bluesky.fetch = (input, init) => {
+    const request = new Request(input, init);
+    authorizations.push({
+      path: new URL(request.url).pathname,
+      authorization: request.headers.get("Authorization"),
+    });
+    return bluesky.fetch(input, init);
+  };
+  const { run } = newRun(bluesky, APP_PASSWORD, recordingFetch);
 
   await expect(run()).resolves.toBeUndefined();
 
   expect(requestPhases(bluesky)).toStrictEqual([
+    "repo.getRecord",
     "listRecords app.bsky.feed.like",
     "server.createSession",
     "repo.applyWrites",
@@ -502,8 +546,18 @@ test("runs every kind in order after one login when one record of each is older 
     "listRecords app.bsky.feed.postgate",
     "repo.applyWrites",
   ]);
+  const [profileRead] = requestsTo(bluesky, "com.atproto.repo.getRecord");
+  expect(Object.fromEntries(new URL(profileRead.url).searchParams)).toStrictEqual({
+    repo: env.BLUESKY_DID,
+    collection: "app.bsky.actor.profile",
+    rkey: "self",
+  });
+  expect(authorizations[0]).toStrictEqual({
+    path: "/xrpc/com.atproto.repo.getRecord",
+    authorization: null,
+  });
   expect(requestsTo(bluesky, "com.atproto.server.createSession")).toHaveLength(1);
-  expect(bluesky.requests()).toHaveLength(16);
+  expect(bluesky.requests()).toHaveLength(17);
 });
 
 test("fails after the likes total, with no reposts total or repost write, when listing a repost page fails", async () => {
@@ -544,6 +598,7 @@ test("fails with no reposts total and keeps the repost when the login is rejecte
   expect(error).toBeInstanceOf(Error);
   expect(entries).toStrictEqual([info(NO_OLD_LIKES)]);
   expect(requestPhases(bluesky)).toStrictEqual([
+    "repo.getRecord",
     "listRecords app.bsky.feed.like",
     "listRecords app.bsky.feed.repost",
     "server.createSession",
@@ -725,6 +780,7 @@ test("logs in after listing posts when only a post is older than one year", asyn
   await expect(run()).resolves.toBeUndefined();
 
   expect(requestPhases(bluesky)).toStrictEqual([
+    "repo.getRecord",
     "listRecords app.bsky.feed.like",
     "listRecords app.bsky.feed.repost",
     "listRecords app.bsky.feed.post",
@@ -777,4 +833,226 @@ test("deletes only the datable old post and reports the undatable posts as skipp
     info(NO_OLD_QUOTE_SETTINGS),
   ]);
   expect(bluesky.accountPosts()).toStrictEqual([noDate, notADate]);
+});
+
+// Feature: feature/keep-pinned-post.feature
+const rkeyOf = (record: { uri: string }) => record.uri.split("/").at(-1);
+const deletedPostRkeys = (bluesky: FakeBluesky) =>
+  bluesky.receivedWrites().map((writes) => writes.map((write) => write.rkey));
+
+test("keeps the only old post and neither logs in nor deletes when it is pinned", async () => {
+  const bluesky = newBluesky();
+  const pinned = bluesky.addAccountPost({
+    kind: "plain",
+    text: "a pinned post",
+    createdAt: createdAgo(400 * DAY),
+  });
+  bluesky.pinPost(pinned);
+  const { entries, run } = newRun(bluesky, APP_PASSWORD);
+
+  await expect(run()).resolves.toBeUndefined();
+
+  expect(entries).toStrictEqual([
+    info(NO_OLD_LIKES),
+    info(NO_OLD_REPOSTS),
+    ...noOldPostsOrSettings,
+  ]);
+  expect(requestPhases(bluesky)).toStrictEqual([
+    "repo.getRecord",
+    "listRecords app.bsky.feed.like",
+    "listRecords app.bsky.feed.repost",
+    "listRecords app.bsky.feed.post",
+    "listRecords app.bsky.feed.threadgate",
+    "listRecords app.bsky.feed.postgate",
+  ]);
+  expect(requestsTo(bluesky, "com.atproto.server.createSession")).toHaveLength(0);
+  expect(requestsTo(bluesky, "com.atproto.repo.applyWrites")).toHaveLength(0);
+  expect(bluesky.accountPosts()).toStrictEqual([pinned]);
+});
+
+test("deletes the old post when the pin has moved to a post younger than one year", async () => {
+  const bluesky = newBluesky();
+  const old = bluesky.addAccountPost({
+    kind: "plain",
+    text: "an old post",
+    createdAt: createdAgo(400 * DAY),
+  });
+  const pinned = bluesky.addAccountPost({
+    kind: "plain",
+    text: "a pinned young post",
+    createdAt: createdAgo(1 * DAY),
+  });
+  bluesky.pinPost(pinned);
+  const { entries, run } = newRun(bluesky, APP_PASSWORD);
+
+  await expect(run()).resolves.toBeUndefined();
+
+  expect(entries).toStrictEqual([
+    info(NO_OLD_LIKES),
+    info(NO_OLD_REPOSTS),
+    deleting("post", old),
+    info("Deleted 1 of 1 post older than one year"),
+    info(NO_OLD_REPLY_SETTINGS),
+    info(NO_OLD_QUOTE_SETTINGS),
+  ]);
+  expect(bluesky.accountPosts()).toStrictEqual([pinned]);
+});
+
+test("deletes the old post when the account has no profile record", async () => {
+  const bluesky = newBluesky();
+  const old = bluesky.addAccountPost({
+    kind: "plain",
+    text: "an old post",
+    createdAt: createdAgo(400 * DAY),
+  });
+  const { entries, run } = newRun(bluesky, APP_PASSWORD);
+
+  await expect(run()).resolves.toBeUndefined();
+
+  expect(entries).toStrictEqual([
+    info(NO_OLD_LIKES),
+    info(NO_OLD_REPOSTS),
+    deleting("post", old),
+    info("Deleted 1 of 1 post older than one year"),
+    info(NO_OLD_REPLY_SETTINGS),
+    info(NO_OLD_QUOTE_SETTINGS),
+  ]);
+  expect(bluesky.accountPosts()).toStrictEqual([]);
+});
+
+test("deletes the old post when the profile has no pinned post", async () => {
+  const bluesky = newBluesky();
+  const old = bluesky.addAccountPost({
+    kind: "plain",
+    text: "an old post",
+    createdAt: createdAgo(400 * DAY),
+  });
+  bluesky.addProfileWithoutPin();
+  const { entries, run } = newRun(bluesky, APP_PASSWORD);
+
+  await expect(run()).resolves.toBeUndefined();
+
+  expect(entries).toStrictEqual([
+    info(NO_OLD_LIKES),
+    info(NO_OLD_REPOSTS),
+    deleting("post", old),
+    info("Deleted 1 of 1 post older than one year"),
+    info(NO_OLD_REPLY_SETTINGS),
+    info(NO_OLD_QUOTE_SETTINGS),
+  ]);
+  expect(bluesky.accountPosts()).toStrictEqual([]);
+});
+
+test("deletes the old own post when the pinned post belongs to another account", async () => {
+  const bluesky = newBluesky();
+  const old = bluesky.addAccountPost({
+    kind: "plain",
+    text: "an old post",
+    createdAt: createdAgo(400 * DAY),
+  });
+  bluesky.pinPost(bluesky.addPost("another account's post"));
+  const { entries, run } = newRun(bluesky, APP_PASSWORD);
+
+  await expect(run()).resolves.toBeUndefined();
+
+  expect(entries).toStrictEqual([
+    info(NO_OLD_LIKES),
+    info(NO_OLD_REPOSTS),
+    deleting("post", old),
+    info("Deleted 1 of 1 post older than one year"),
+    info(NO_OLD_REPLY_SETTINGS),
+    info(NO_OLD_QUOTE_SETTINGS),
+  ]);
+  expect(bluesky.accountPosts()).toStrictEqual([]);
+});
+
+test("keeps the pinned post when the pinned CID differs from the post's CID", async () => {
+  const bluesky = newBluesky();
+  const pinned = bluesky.addAccountPost({
+    kind: "plain",
+    text: "a pinned post",
+    createdAt: createdAgo(400 * DAY),
+  });
+  bluesky.pinPost(pinned, { cid: "bafyreigh2akiscaildcqabsyg3dfr6chu3fgpregiymsck7e7aqa4s52zy" });
+  const { entries, run } = newRun(bluesky, APP_PASSWORD);
+
+  await expect(run()).resolves.toBeUndefined();
+
+  expect(entries).toStrictEqual([
+    info(NO_OLD_LIKES),
+    info(NO_OLD_REPOSTS),
+    ...noOldPostsOrSettings,
+  ]);
+  expect(bluesky.accountPosts()).toStrictEqual([pinned]);
+});
+
+test("deletes the old settings of the pinned post by their own age and keeps the pinned post", async () => {
+  const bluesky = newBluesky();
+  const pinned = bluesky.addAccountPost({
+    kind: "plain",
+    text: "a pinned post",
+    createdAt: createdAgo(400 * DAY),
+  });
+  const replySettings = bluesky.addReplySettings({
+    post: pinned,
+    createdAt: createdAgo(400 * DAY),
+  });
+  const quoteSettings = bluesky.addQuoteSettings({
+    post: pinned,
+    createdAt: createdAgo(400 * DAY),
+  });
+  bluesky.pinPost(pinned);
+  const { entries, run } = newRun(bluesky, APP_PASSWORD);
+
+  await expect(run()).resolves.toBeUndefined();
+
+  expect(entries).toStrictEqual([
+    info(NO_OLD_LIKES),
+    info(NO_OLD_REPOSTS),
+    info(NO_OLD_POSTS),
+    deleting("reply settings", replySettings),
+    info("Deleted 1 of 1 reply settings older than one year"),
+    deleting("quote settings", quoteSettings),
+    info("Deleted 1 of 1 quote settings older than one year"),
+  ]);
+  expect(bluesky.accountPosts()).toStrictEqual([pinned]);
+  expect(bluesky.replySettings()).toStrictEqual([]);
+  expect(bluesky.quoteSettings()).toStrictEqual([]);
+});
+
+test("batches the old posts around the pinned post, oldest first, and never names it", async () => {
+  const bluesky = newBluesky();
+  const posts = Array.from({ length: 450 }, (_, i) =>
+    bluesky.addAccountPost({
+      kind: "plain",
+      text: "an account post",
+      createdAt: createdAgo(400 * DAY + i * HOUR),
+    }),
+  );
+  const oldestFirst = [...posts].reverse();
+  const pinned = oldestFirst[200] as FakeAccountPost;
+  bluesky.pinPost(pinned);
+  const deletable = oldestFirst.filter((post) => post !== pinned);
+  const { entries, run } = newRun(bluesky, APP_PASSWORD);
+
+  await expect(run()).resolves.toBeUndefined();
+
+  expect(deletedPostRkeys(bluesky)).toStrictEqual([
+    deletable.slice(0, 200).map(rkeyOf),
+    deletable.slice(200, 400).map(rkeyOf),
+    deletable.slice(400).map(rkeyOf),
+  ]);
+  expect(bluesky.receivedWrites().map((writes) => writes.length)).toStrictEqual([200, 200, 49]);
+  expect(
+    bluesky.receivedWrites().flatMap((writes) => writes.map((write) => write.collection)),
+  ).toStrictEqual(Array(449).fill("app.bsky.feed.post"));
+  expect(entries).toStrictEqual([
+    info(NO_OLD_LIKES),
+    info(NO_OLD_REPOSTS),
+    ...deletable.map((post) => deleting("post", post)),
+    info("Deleted 449 of 449 posts older than one year"),
+    info(NO_OLD_REPLY_SETTINGS),
+    info(NO_OLD_QUOTE_SETTINGS),
+  ]);
+  expect(bluesky.accountPosts()).toStrictEqual([pinned]);
 });

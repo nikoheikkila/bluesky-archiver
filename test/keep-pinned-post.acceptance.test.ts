@@ -8,7 +8,7 @@ import { createFakeBluesky } from "./fake-bluesky";
 
 const APP_PASSWORD = "test-app-password";
 
-test.fails("Daily run keeps the pinned post when every other post is deleted", async () => {
+test("Daily run keeps the pinned post when every other post is deleted", async () => {
   const runStart = Date.parse("2026-11-08T03:00:00Z");
   const createdBefore = (ms: number) => new Date(runStart - ms).toISOString();
 

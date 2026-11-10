@@ -24,12 +24,14 @@ and reduces the risk of online harassment.
   that other services already received through the Bluesky firehose stay where they are.
 - Other people's replies to and quotes of a deleted post stay and point at a post that no longer
   exists. Media files of deleted posts are left to the server to clean up.
-- The pinned post is not yet protected: a pinned post older than one year is deleted. Protecting it
-  is the next slice, due before 2027-08-15.
+- The pinned post is never deleted, however old it is, as long as it stays pinned. If you unpin an
+  old post or pin another one, the next run deletes it. The pinned post's reply settings and quote
+  settings are still deleted when they are older than one year.
 
 ## How a run works
 
-For likes, then reposts, posts, reply settings and quote settings, in that order, the Worker:
+First the Worker reads the account's profile record with `com.atproto.repo.getRecord` to find the
+pinned post. Then, for likes, reposts, posts, reply settings and quote settings, in that order, it:
 
 1. lists every record of the collection through the public `com.atproto.repo.listRecords`
    endpoint;
@@ -40,12 +42,13 @@ For likes, then reposts, posts, reply settings and quote settings, in that order
    such as `Deleted 3 of 3 reposts older than one year`.
 
 If any request fails, the run stops with an error, and the next day's run deletes the rest. A
-failure in one kind never undoes what the kinds before it already deleted that day. Each request
-times out after 10 seconds, and a request that takes longer is aborted and counts as a failure.
-Listing all five kinds takes 37 requests in total; a day that deletes from three kinds
-makes about 41, and the Workers Free plan allows 50. The listings of all five kinds share that cap.
-A run exceeds 50 requests from 1,801 posts on a day its deletions fit one batch, and from 1,201
-posts when every post is old, because deleting more than 200 posts takes more than one batch. The
+failure in one kind never undoes what the kinds before it already deleted that day. A failed
+profile read stops the run before anything is deleted. Each request times out after 10 seconds,
+and a request that takes longer is aborted and counts as a failure. Listing all five kinds takes
+37 requests in total, and the profile read adds 1; a day that deletes from three kinds makes about
+42, and the Workers Free plan allows 50. The listings of all five kinds share that cap. A run
+exceeds 50 requests from 1,701 posts on a day its deletions fit one batch, and from 1,201 posts
+when every post is old, because deleting more than 200 posts takes more than one batch. The
 Request Budget section of AGENTS.md has the formula and the other cases.
 
 ## Requirements

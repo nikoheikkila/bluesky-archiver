@@ -32,6 +32,7 @@ export async function readPinnedPost(options: ReadPinnedPostOptions): Promise<st
     return undefined;
   }
   // An unread body is cancelled so the Workers runtime releases the connection.
+  // Stryker disable next-line ConditionalExpression: after response.json() the body is closed, so cancel() is a no-op and the catch swallows any rejection, leaving the thrown error the same.
   if (!response.bodyUsed) {
     await response.body?.cancel().catch(() => undefined);
   }
@@ -49,4 +50,11 @@ function treatUnparseableAsEmpty(error: unknown): ErrorBody {
     return {};
   }
   throw error;
+}
+
+export function withoutPinnedPost<R extends { uri: string }>(
+  records: R[],
+  pinnedUri: string | undefined,
+): R[] {
+  return records.filter((record) => record.uri !== pinnedUri);
 }

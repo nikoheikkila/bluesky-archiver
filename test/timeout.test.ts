@@ -45,7 +45,7 @@ test("keeps the request's method and body and adds an abort signal", async () =>
   expect(inits[0]?.signal).toBeInstanceOf(AbortSignal);
 });
 
-test("gives createSession, listRecords and applyWrites requests an abort signal in a run", async () => {
+test("gives getRecord, createSession, listRecords and applyWrites requests an abort signal in a run", async () => {
   const bluesky = createFakeBluesky({
     did: env.BLUESKY_DID,
     baseUrl: env.BLUESKY_SERVER_URL,
@@ -92,7 +92,7 @@ test("stops the run at a request that never finishes: the run rejects with a Tim
 
   await expect(run).rejects.toMatchObject({ name: "TimeoutError" });
   expect(inputs.map((input) => new URL(input).searchParams.get("collection"))).toStrictEqual([
-    "app.bsky.feed.like",
+    "app.bsky.actor.profile",
   ]);
 });
 

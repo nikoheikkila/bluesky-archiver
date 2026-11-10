@@ -10,9 +10,9 @@ A Cloudflare Worker (TypeScript, Wrangler) that runs daily at 03:00 UTC against 
 account's likes, reposts, posts (plain posts, replies and quote posts), reply settings
 (`app.bsky.feed.threadgate`) and quote settings (`app.bsky.feed.postgate`) that are older than one
 year (the age rule is under [Constraints](#constraints)). There is no mode or flag that turns
-deletion off. Reposts are direct `app.bsky.feed.repost` records only. The pinned post is not yet
-protected: a pinned post older than one year is deleted. Protecting it is the next slice, due before
-2027-08-15, when the current pinned post turns old.
+deletion off. Reposts are direct `app.bsky.feed.repost` records only. The pinned post is kept while
+it stays pinned, however old it is; if the user unpins it or pins another post, the next daily run
+deletes it. Its reply settings and quote settings are still deleted by the age rule.
 
 ## Commands
 
@@ -81,16 +81,20 @@ kill as equivalent with a one-line argument rather than forcing a brittle test.
 
 ## Architecture
 
-The pipeline per kind is `listRecords → selectOldRecords → login (createSession) → deleteRecords
-(applyWrites) → formatRecordLine / formatDeletionSummary → log`, built by `createWorker()` in
-`src/worker.ts` and bound to the real `fetch` and `console` in `src/index.ts`. The kinds run in
-order in one invocation: likes (`app.bsky.feed.like`), reposts (`app.bsky.feed.repost`), posts
-(`app.bsky.feed.post`), reply settings (`app.bsky.feed.threadgate`) and quote settings
-(`app.bsky.feed.postgate`). Login happens at most once, and only when something is old. A kind with
-no old records skips deletion. After each batch succeeds, one
-`debug` line (`deleting <noun> <record URI>`) is logged per deleted record; the `info` summary
-lines for the kind follow. Any non-OK response throws, so the run fails without a summary line for
-that kind, and a failed request in one kind stops the run before any request of the kinds after it.
+A run starts with one profile read (`readPinnedPost`, a `getRecord` of
+`app.bsky.actor.profile/self`) that finds the pinned post. The pipeline per kind is
+`listRecords → selectOldRecords → login (createSession) → deleteRecords (applyWrites) →
+formatRecordLine / formatDeletionSummary → log`, built by `createWorker()` in `src/worker.ts` and
+bound to the real `fetch` and `console` in `src/index.ts`. The kinds run in order in one
+invocation: likes (`app.bsky.feed.like`), reposts (`app.bsky.feed.repost`), posts
+(`app.bsky.feed.post`, with the pinned post removed before selection), reply settings
+(`app.bsky.feed.threadgate`) and quote settings (`app.bsky.feed.postgate`). Login happens at most
+once, and only when something is old. A kind with no old records skips deletion. After each batch
+succeeds, one `debug` line (`deleting <noun> <record URI>`) is logged per deleted record; the
+`info` summary lines for the kind follow. Any non-OK response throws, so the run fails without a
+summary line for that kind, and a failed request in one kind stops the run before any request of
+the kinds after it. A failed profile read fails the run before any other request, so nothing is
+deleted.
 
 - `src/bluesky.ts` — `listRecords({ baseUrl, did, collection, fetch })` pages through the public
   `com.atproto.repo.listRecords` endpoint for any collection (`limit=100`) until an empty page or a
@@ -116,15 +120,22 @@ that kind, and a failed request in one kind stops the run before any request of 
   collection's type. Before the first `applyWrites`, it refuses a record whose URI is not
   `at://<did>/<collection>/<rkey>`, so no request is sent for it. `deleteLikes()` is a thin wrapper
   over it.
+- `src/profile.ts` — `readPinnedPost({ baseUrl, did, fetch })` reads `app.bsky.actor.profile/self`
+  with one unauthenticated `com.atproto.repo.getRecord` and returns the URI in
+  `value.pinnedPost.uri`, or nothing; the CID is ignored. A missing profile (HTTP 400
+  `RecordNotFound`) or one without `pinnedPost` pins nothing, and any other non-OK response throws.
+  `withoutPinnedPost(records, pinnedUri)` drops the record whose `uri` equals the pinned URI. The
+  posts kind uses it before selection, so the pinned post is neither found nor skipped, and is not
+  logged.
 - `src/report.ts` — `formatRecordLine()`, `formatLikeLine()` and `formatDeletionSummary()`, whose
   noun is "like", "repost", "post", "reply settings" or "quote settings". The settings nouns never
   change form. `formatRecordLine(record, noun)` prints the URI of the deleted record itself, not its
   subject or its post. Wording is fixed by the spec.
 - `src/timeout.ts` — `withRequestTimeout(fetch, timeoutMs)` returns a fetch that aborts every
   request after `REQUEST_TIMEOUT_MS` (10 seconds). `createWorker` applies it to the injected fetch,
-  so `createSession`, `listRecords` and `applyWrites` all have it. A timed-out request rejects and
-  fails the run like any other failed request. The module imports nothing from `@bsky/sdk` or
-  `@atproto/lex`.
+  so `getRecord`, `createSession`, `listRecords` and `applyWrites` all have it. A timed-out request
+  rejects and fails the run like any other failed request. The module imports nothing from
+  `@bsky/sdk` or `@atproto/lex`.
 - `src/worker.ts` — `createWorker({ fetch, log, requestTimeoutMs })` returns the handlers object
   with `scheduled`. The optional `requestTimeoutMs` defaults to `REQUEST_TIMEOUT_MS` (10 seconds);
   tests inject a short value. It reads the `BLUESKY_APP_PASSWORD` secret and fails before listing
@@ -250,17 +261,25 @@ init), log: ({ level, message }) => writers[level](message) })`, where `writers`
 
 ## Constraints
 
-- The Worker sends only `GET listRecords` (for `app.bsky.feed.like`, `app.bsky.feed.repost`,
-  `app.bsky.feed.post`, `app.bsky.feed.threadgate` and `app.bsky.feed.postgate`),
-  `POST createSession` and `POST applyWrites`. `applyWrites` carries deletes of those five
-  collections only, one collection per batch and never mixed. It never deletes
-  `app.bsky.actor.profile`, follows, blocks or lists, and it never calls `deleteSession`.
+- The Worker sends only `GET getRecord` (for `app.bsky.actor.profile`, record key `self`),
+  `GET listRecords` (for `app.bsky.feed.like`, `app.bsky.feed.repost`, `app.bsky.feed.post`,
+  `app.bsky.feed.threadgate` and `app.bsky.feed.postgate`), `POST createSession` and
+  `POST applyWrites`. `applyWrites` carries deletes of those five feed collections only, one
+  collection per batch and never mixed. It never deletes `app.bsky.actor.profile`, follows, blocks
+  or lists, and it never calls `deleteSession`.
 - The age rule is a global invariant and applies to every record kind the Worker deletes. A record
   is older than one year when its own `createdAt` is strictly more than 365 × 24 h before the run
   starts; the run start is `controller.scheduledTime`, and the comparison is in UTC. A record whose
   subject was deleted, or whose author has left, is judged by its own `createdAt` too. A record
-  with a missing or unparseable `createdAt` is never deleted. Once the backlog is cleared, no
-  record is older than 366 days.
+  with a missing or unparseable `createdAt` is never deleted. The one exception is the pinned post,
+  the account post whose `uri` equals `value.pinnedPost.uri` in the profile; it is kept while it
+  stays pinned, however old it is. Its reply settings and quote settings follow the age rule like
+  all others. A post the user unpins, or replaces by pinning another, is deleted by the next run if
+  it is old. Once the backlog is cleared, no record is older than 366 days, except the pinned post.
+- The profile read comes before every other request. A failed read (an HTTP 400 other than
+  `RecordNotFound`, any other non-OK response, or a timeout) fails the run before any other
+  request, so nothing is deleted. A missing profile, or a profile without `pinnedPost`, pins
+  nothing.
 - It holds one secret, `BLUESKY_APP_PASSWORD`, a Worker secret whose `.env` entry is an `op://`
   reference, never the value. The password must never appear in logs, errors, or the repository.
 - Any Cloudflare resource (KV, D1, R2, Durable Objects, and so on) is allowed when its usage stays
@@ -279,30 +298,32 @@ init), log: ({ level, message }) => writers[level](message) })`, where `writers`
 
 - The Workers Free plan allows at most 50 outgoing requests per invocation and has a CPU limit; the
   specs escalate above 45. A run's requests are the sum over the five kinds of `ceil(n / 100) + 1`
-  listings (`n` is the kind's record count, and an empty kind costs 1), plus 1 `createSession` when
-  any record is old, plus the sum over kinds of `ceil(old / 200)` `applyWrites` (`old` is the
-  kind's old-record count; a kind with no old records adds none). The `+ 1` in a listing is the
-  empty page that ends the walk, since every non-empty page carries a cursor.
+  listings (`n` is the kind's record count, and an empty kind costs 1), plus 1 `getRecord` for the
+  profile, plus 1 `createSession` when any record is old, plus the sum over kinds of
+  `ceil(old / 200)` `applyWrites` (`old` is the kind's old-record count; a kind with no old records
+  adds none). The `+ 1` in a listing is the empty page that ends the walk, since every non-empty
+  page carries a cursor.
 - Today's listings alone are 37: likes 22 (2,056 records), reposts 4 (235), posts 8 (662),
   threadgate 2 (1) and postgates 1 (0). A day that deletes from three kinds, each within one
-  200-record batch, makes 41 requests: 37 listings, 1 `createSession` and 3 `applyWrites`.
+  200-record batch, makes 42 requests: 37 listings, 1 `getRecord`, 1 `createSession` and 3
+  `applyWrites`.
 - The thresholds depend on the posts, the only kind that can outgrow one batch. The other kinds
   stay at today's 29 listings (likes 22, reposts 4, threadgate 2, postgates 1) with no old records.
   With `p` posts of which `o` are old:
-  - quiet day (`o = 0`): `30 + ceil(p / 100)` requests. Above 45 from 1,501 posts; above 50 from
-    2,001.
-  - one posts batch (`1 <= o <= 200`): `32 + ceil(p / 100)`. Above 45 from 1,301 posts; above 50
-    from 1,801.
-  - backlog (`o = p`, so `ceil(p / 200)` batches): `31 + ceil(p / 100) + ceil(p / 200)`. Above 45
-    from 901 posts; above 50 from 1,201. At 1,201 posts that is 43 listings, 1 `createSession` and
-    7 `applyWrites`: 51.
+  - quiet day (`o = 0`): `31 + ceil(p / 100)` requests. Above 45 from 1,401 posts; above 50 from
+    1,901.
+  - one posts batch (`1 <= o <= 200`): `33 + ceil(p / 100)`. Above 45 from 1,201 posts; above 50
+    from 1,701.
+  - backlog (`o = p`, so `ceil(p / 200)` batches): `32 + ceil(p / 100) + ceil(p / 200)`. Above 45
+    from 801 posts; above 50 from 1,201. At 1,201 posts that is 43 listings, 1 `getRecord`, 1
+    `createSession` and 7 `applyWrites`: 52.
 
   Every post being old is the worst case for a given `p`, so the backlog line is the highest bound.
 - After the post backlog is cleared, only posts under a year old remain. With today's 2,056 likes,
   235 reposts, 1 threadgate and no postgate (29 listings), 34 listings need 301 to 400 posts left,
   because those posts cost 5 listings. With all five kinds old and each within one batch, a run
-  makes about 40 requests: 34 listings, 1 `createSession` and 5 `applyWrites`. A kind with more
-  than 200 old records adds `ceil(old / 200) - 1` `applyWrites` for that kind.
+  makes about 41 requests: 34 listings, 1 `getRecord`, 1 `createSession` and 5 `applyWrites`. A
+  kind with more than 200 old records adds `ceil(old / 200) - 1` `applyWrites` for that kind.
 - The listings of all five kinds share the 50-request cap, so the account's size is a limit too.
   The run order is likes, reposts, posts, threadgate, postgates, so 26 listings (likes 22, reposts
   4) come before posts. Past 50, the run fails at the request that crosses the cap, and the kinds
