@@ -1,7 +1,15 @@
-// Shared contract suite for com.atproto.repo.listRecords (app.bsky.feed.like and app.bsky.feed.repost).
+// Shared contract suite for com.atproto.repo.listRecords (app.bsky.feed.like, app.bsky.feed.repost, app.bsky.feed.post,
+// app.bsky.feed.threadgate and app.bsky.feed.postgate).
 // Holds for any account: it runs against the fake and, opt-in, the real server.
 import { expect } from "vitest";
 import type { Fetch } from "../../src/bluesky";
+
+export type ListedCollection =
+  | "app.bsky.feed.like"
+  | "app.bsky.feed.repost"
+  | "app.bsky.feed.post"
+  | "app.bsky.feed.threadgate"
+  | "app.bsky.feed.postgate";
 
 export interface ListRecordsTarget {
   baseUrl: string;
@@ -9,27 +17,42 @@ export interface ListRecordsTarget {
   limit: number;
   fetch: Fetch;
   /** Defaults to app.bsky.feed.like. */
-  collection?: "app.bsky.feed.like" | "app.bsky.feed.repost";
+  collection?: ListedCollection;
 }
 
-export interface LikeRecord {
+export interface ListedRecord {
   uri: string;
   cid?: string;
   value: {
     $type?: string;
     createdAt: string;
-    subject: { uri: string; cid?: string };
+    subject?: { uri: string; cid?: string };
+    text?: string;
+    reply?: { root: { uri: string; cid?: string }; parent: { uri: string; cid?: string } };
+    embed?: { $type: string };
     via?: { uri: string; cid?: string };
+    post?: string;
+    hiddenReplies?: string[];
+    detachedEmbeddingUris?: string[];
   };
 }
 
 interface ListRecordsPage {
   status: number;
   cursor?: string;
-  records: LikeRecord[];
+  records: ListedRecord[];
 }
 
 const MAX_PAGES = 1000;
+
+// What every served record of a collection carries besides its uri and value.createdAt.
+const REQUIRED_VALUE_FIELDS: Record<ListedCollection, Record<string, unknown>> = {
+  "app.bsky.feed.like": { subject: expect.objectContaining({ uri: expect.any(String) }) },
+  "app.bsky.feed.repost": { subject: expect.objectContaining({ uri: expect.any(String) }) },
+  "app.bsky.feed.post": { text: expect.any(String) },
+  "app.bsky.feed.threadgate": { post: expect.any(String) },
+  "app.bsky.feed.postgate": { post: expect.any(String) },
+};
 
 async function fetchPage(target: ListRecordsTarget, cursor?: string): Promise<ListRecordsPage> {
   const url = new URL("/xrpc/com.atproto.repo.listRecords", target.baseUrl);
@@ -60,7 +83,7 @@ async function fetchAllPages(target: ListRecordsTarget): Promise<ListRecordsPage
   return pages;
 }
 
-export async function walkListRecords(target: ListRecordsTarget): Promise<LikeRecord[][]> {
+export async function walkListRecords(target: ListRecordsTarget): Promise<ListedRecord[][]> {
   const pages = await fetchAllPages(target);
   const nonEmpty = pages.slice(0, -1);
 
@@ -83,13 +106,16 @@ export async function walkListRecords(target: ListRecordsTarget): Promise<LikeRe
 
   const records = pages.flatMap((page) => page.records);
   const uris = records.map((record) => record.uri);
-  expect(records, "every record has a uri, value.createdAt and value.subject.uri").toEqual(
+  expect(
+    records,
+    "every record has a uri, value.createdAt and the value fields its collection requires",
+  ).toEqual(
     Array(records.length).fill(
       expect.objectContaining({
         uri: expect.any(String),
         value: expect.objectContaining({
           createdAt: expect.any(String),
-          subject: expect.objectContaining({ uri: expect.any(String) }),
+          ...REQUIRED_VALUE_FIELDS[target.collection ?? "app.bsky.feed.like"],
         }),
       }),
     ),

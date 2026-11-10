@@ -128,13 +128,27 @@ init), log: ({ level, message }) => writers[level](message) })`, where `writers`
   failure injection (`failPage` per cursor, `failApplyWrites` per call). `receivedWrites()` returns
   the writes of every authorised `applyWrites` call in order, refused ones included. `addLikes()`
   and `addReposts()` seed many records in one call.
-- `listRecords` serves `app.bsky.feed.like` and `app.bsky.feed.repost`. `applyWrites` accepts
-  deletes of those two collections only, at most 200 per call; it rejects anything else, including
-  deletes of `app.bsky.feed.post`, with HTTP 400 and deletes nothing in that case. The fake also
-  models the account's quote posts (`app.bsky.feed.post` records with an `app.bsky.embed.record`
-  embed): tests store them and read them back, but `listRecords` never lists them. The test harness
-  can also delete posts (likes and reposts remain, as on the real server).
-- **The fake must behave like the real server.** Likes and reposts page the same way: every
+- `listRecords` serves `app.bsky.feed.like`, `app.bsky.feed.repost`, `app.bsky.feed.post`,
+  `app.bsky.feed.threadgate` (reply settings) and `app.bsky.feed.postgate` (quote settings).
+  `applyWrites` accepts deletes of those five collections only, at most 200 per call; it rejects
+  any other collection, including `app.bsky.actor.profile`, with HTTP 400 and deletes nothing in
+  that case.
+- The account's own posts (plain, reply, and quote posts with an `app.bsky.embed.record` or
+  `app.bsky.embed.recordWithMedia` embed) are stored with `addAccountPost(post)` and read back with
+  `accountPosts()`. `listRecords` serves them, and the fake validates each against its lexicon when
+  stored, except that a missing or malformed `createdAt` is allowed.
+- Reply settings and quote settings are stored with `addReplySettings({ post, createdAt })` and
+  `addQuoteSettings({ post, createdAt })` and read back with `replySettings()` and
+  `quoteSettings()`. A settings record shares its post's record key, so each settings record needs
+  its own post. The fake validates each against its lexicon when stored, with the same `createdAt`
+  exemption as posts. It checks the lexicon fields `hiddenReplies` (threadgate) and
+  `detachedEmbeddingUris` (postgate) too.
+- Subject posts from `addPost()` belong to another account and never appear in the account's post
+  listing. The test harness can delete them with `deletePost()` (likes and reposts remain, as on
+  the real server).
+- `addQuotePost()` and `quotePosts()` remain for the existing quote-post tests. Their quote posts
+  are not listed.
+- **The fake must behave like the real server.** Every collection pages the same way: every
   non-empty page carries a cursor, even the last partial one, and paging ends on an empty page
   without a cursor. `test/contract/` holds the shared contract suites (`list-records.contract.ts`
   and `write.contract.ts`), run against the fake by `test/contract/fake.test.ts` in the default

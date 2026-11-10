@@ -1,8 +1,9 @@
 // Shared contract for com.atproto.server.createSession and com.atproto.repo.applyWrites
-// (deletes of app.bsky.feed.like and app.bsky.feed.repost). Holds for the fake; the default suite never sends it to the real server.
+// (deletes of app.bsky.feed.like, app.bsky.feed.repost, app.bsky.feed.post, app.bsky.feed.threadgate and
+// app.bsky.feed.postgate). Holds for the fake; the default suite never sends it to the real server.
 import { expect } from "vitest";
 import type { Fetch } from "../../src/bluesky";
-import { walkListRecords } from "./list-records.contract";
+import { type ListedCollection, walkListRecords } from "./list-records.contract";
 
 export interface WriteTarget {
   baseUrl: string;
@@ -12,7 +13,7 @@ export interface WriteTarget {
   likeUris: [string, string, string];
   fetch: Fetch;
   /** Defaults to app.bsky.feed.like. */
-  collection?: "app.bsky.feed.like" | "app.bsky.feed.repost";
+  collection?: ListedCollection;
 }
 
 interface SessionResponse {
@@ -92,9 +93,9 @@ export async function walkWrites(target: WriteTarget): Promise<{ afterDelete: st
   const session = await createSession(target);
 
   const deleted = await applyWrites(target, [rkeyOf(first), rkeyOf(second)], session.accessJwt);
-  expect(deleted.status, "applyWrites deleting 2 of 3 likes status").toBe(200);
+  expect(deleted.status, "applyWrites deleting 2 of 3 records status").toBe(200);
   const afterDelete = await remainingLikeUris(target);
-  expect(afterDelete, "only the third like remains after deleting 2 of 3").toStrictEqual([third]);
+  expect(afterDelete, "only the third record remains after deleting 2 of 3").toStrictEqual([third]);
 
   const tooMany = [
     rkeyOf(third),
@@ -118,7 +119,7 @@ export async function walkWrites(target: WriteTarget): Promise<{ afterDelete: st
 }
 
 // Writes that are valid under the applyWrites lexicon but break the rule that applyWrites carries only
-// deletes of app.bsky.feed.like. Each one travels together with a valid like delete.
+// deletes of the account's likes, reposts and posts. Each one travels together with a valid like delete.
 export interface ForbiddenWrite {
   name: string;
   write(target: WriteTarget): object;
@@ -153,11 +154,11 @@ export const FORBIDDEN_WRITES: ForbiddenWrite[] = [
     }),
   },
   {
-    name: "a delete in app.bsky.feed.post",
-    write: (target) => ({
+    name: "a delete of app.bsky.actor.profile",
+    write: () => ({
       $type: "com.atproto.repo.applyWrites#delete",
-      collection: "app.bsky.feed.post",
-      rkey: rkeyOf(target.likeUris[1]),
+      collection: "app.bsky.actor.profile",
+      rkey: "self",
     }),
   },
 ];
