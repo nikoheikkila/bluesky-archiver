@@ -1,7 +1,7 @@
 // Feature: feature/delete-old-likes.feature
 // Cycle 5: format the report.
 import { expect, test } from "vitest";
-import type { LikeRecord, RepostRecord } from "../src/bluesky";
+import type { DatedRecordOf, LikeRecord, RepostRecord } from "../src/bluesky";
 import { formatDeletionSummary, formatLikeLine, formatRecordLine } from "../src/report";
 
 function like(id: string, createdAt: string): LikeRecord {
@@ -151,6 +151,161 @@ test.each(repostSummaries)(
     const lines = formatDeletionSummary(summary, "repost");
 
     expect(lines).toStrictEqual(expected);
+    expect(lines.filter((line) => line.endsWith("."))).toStrictEqual([]);
+  },
+);
+
+function dated<C extends string>(collection: C, id: string): DatedRecordOf<C> {
+  return {
+    uri: `at://did:plc:fakeaccount000000000000/${collection}/${id}`,
+    cid: `${collection}-cid-${id}`,
+    value: { $type: collection, createdAt: "2024-04-01T00:00:00.000Z" },
+  };
+}
+
+// Feature: feature/delete-old-posts.feature
+// Cycle 4: report lines for posts, reply settings and quote settings.
+test.each([
+  {
+    name: "post",
+    subject: dated("app.bsky.feed.post", "4"),
+    noun: "post" as const,
+    expected: "deleting post at://did:plc:fakeaccount000000000000/app.bsky.feed.post/4",
+  },
+  {
+    name: "reply settings",
+    subject: dated("app.bsky.feed.threadgate", "5"),
+    noun: "reply settings" as const,
+    expected:
+      "deleting reply settings at://did:plc:fakeaccount000000000000/app.bsky.feed.threadgate/5",
+  },
+  {
+    name: "quote settings",
+    subject: dated("app.bsky.feed.postgate", "6"),
+    noun: "quote settings" as const,
+    expected:
+      "deleting quote settings at://did:plc:fakeaccount000000000000/app.bsky.feed.postgate/6",
+  },
+])("formats the $name as a record line with its own URI", ({ subject, noun, expected }) => {
+  expect(formatRecordLine(subject, noun)).toStrictEqual(expected);
+  expect(formatRecordLine(subject, noun).endsWith(".")).toBe(false);
+});
+
+const newKindSummaries = [
+  {
+    name: "all three posts deleted",
+    noun: "post" as const,
+    summary: { found: 3, deleted: 3, skipped: 0 },
+    expected: ["Deleted 3 of 3 posts older than one year"],
+  },
+  {
+    name: "one post deleted",
+    noun: "post" as const,
+    summary: { found: 1, deleted: 1, skipped: 0 },
+    expected: ["Deleted 1 of 1 post older than one year"],
+  },
+  {
+    name: "no old posts",
+    noun: "post" as const,
+    summary: { found: 0, deleted: 0, skipped: 0 },
+    expected: ["No posts are older than one year"],
+  },
+  {
+    name: "one old post and two skipped",
+    noun: "post" as const,
+    summary: { found: 1, deleted: 1, skipped: 2 },
+    expected: [
+      "Skipped 2 posts without a valid creation time",
+      "Deleted 1 of 1 post older than one year",
+    ],
+  },
+  {
+    name: "one old post and one skipped",
+    noun: "post" as const,
+    summary: { found: 1, deleted: 1, skipped: 1 },
+    expected: [
+      "Skipped 1 post without a valid creation time",
+      "Deleted 1 of 1 post older than one year",
+    ],
+  },
+  {
+    name: "one reply settings deleted",
+    noun: "reply settings" as const,
+    summary: { found: 1, deleted: 1, skipped: 0 },
+    expected: ["Deleted 1 of 1 reply settings older than one year"],
+  },
+  {
+    name: "two reply settings deleted",
+    noun: "reply settings" as const,
+    summary: { found: 2, deleted: 2, skipped: 0 },
+    expected: ["Deleted 2 of 2 reply settings older than one year"],
+  },
+  {
+    name: "no old reply settings",
+    noun: "reply settings" as const,
+    summary: { found: 0, deleted: 0, skipped: 0 },
+    expected: ["No reply settings are older than one year"],
+  },
+  {
+    name: "one old reply settings and two skipped",
+    noun: "reply settings" as const,
+    summary: { found: 1, deleted: 1, skipped: 2 },
+    expected: [
+      "Skipped 2 reply settings without a valid creation time",
+      "Deleted 1 of 1 reply settings older than one year",
+    ],
+  },
+  {
+    name: "one old reply settings and one skipped",
+    noun: "reply settings" as const,
+    summary: { found: 1, deleted: 1, skipped: 1 },
+    expected: [
+      "Skipped 1 reply settings without a valid creation time",
+      "Deleted 1 of 1 reply settings older than one year",
+    ],
+  },
+  {
+    name: "one quote settings deleted",
+    noun: "quote settings" as const,
+    summary: { found: 1, deleted: 1, skipped: 0 },
+    expected: ["Deleted 1 of 1 quote settings older than one year"],
+  },
+  {
+    name: "three quote settings deleted",
+    noun: "quote settings" as const,
+    summary: { found: 3, deleted: 3, skipped: 0 },
+    expected: ["Deleted 3 of 3 quote settings older than one year"],
+  },
+  {
+    name: "no old quote settings",
+    noun: "quote settings" as const,
+    summary: { found: 0, deleted: 0, skipped: 0 },
+    expected: ["No quote settings are older than one year"],
+  },
+  {
+    name: "one old quote settings and three skipped",
+    noun: "quote settings" as const,
+    summary: { found: 1, deleted: 1, skipped: 3 },
+    expected: [
+      "Skipped 3 quote settings without a valid creation time",
+      "Deleted 1 of 1 quote settings older than one year",
+    ],
+  },
+];
+
+test.each(newKindSummaries)(
+  "formats the deletion summary for $name",
+  ({ summary, noun, expected }) => {
+    expect(formatDeletionSummary(summary, noun)).toStrictEqual(expected);
+  },
+);
+
+test.each(newKindSummaries)(
+  "ends no deletion summary line with a period for $name",
+  ({ summary, noun, expected }) => {
+    const lines = formatDeletionSummary(summary, noun);
+
+    expect(lines).toHaveLength(expected.length);
     expect(lines.filter((line) => line.endsWith("."))).toStrictEqual([]);
   },
 );

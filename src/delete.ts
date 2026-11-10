@@ -1,12 +1,12 @@
-import { type Collection, LIKE_COLLECTION, type LikeRecord, type SubjectRecord } from "./bluesky";
+import { type Collection, type DatedRecord, LIKE_COLLECTION, type LikeRecord } from "./bluesky";
 
 /** applyWrites accepts at most 200 writes per call. */
 const MAX_WRITES_PER_BATCH = 200;
 
-export interface DeleteRecordsOptions<T extends SubjectRecord> {
+export interface DeleteRecordsOptions<T extends DatedRecord> {
   did: string;
   fetchHandler: (path: string, init?: RequestInit) => Promise<Response>;
-  onBatchDeleted: (batch: T[]) => void;
+  onBatchDeleted(batch: T[]): void;
 }
 
 export type DeleteLikesOptions = DeleteRecordsOptions<LikeRecord>;
@@ -15,7 +15,7 @@ export function deleteLikes(likes: LikeRecord[], options: DeleteLikesOptions): P
   return deleteRecords(LIKE_COLLECTION, likes, options);
 }
 
-export async function deleteRecords<T extends SubjectRecord>(
+export async function deleteRecords<T extends DatedRecord>(
   collection: Collection,
   records: T[],
   options: DeleteRecordsOptions<T>,
@@ -27,7 +27,7 @@ export async function deleteRecords<T extends SubjectRecord>(
   }
 }
 
-async function applyDeletes<T extends SubjectRecord>(
+async function applyDeletes<T extends DatedRecord>(
   collection: Collection,
   batch: T[],
   { did, fetchHandler }: DeleteRecordsOptions<T>,

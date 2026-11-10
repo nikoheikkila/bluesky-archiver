@@ -1,6 +1,6 @@
-import type { LikeRecord, SubjectRecord } from "./bluesky";
+import type { DatedRecord, LikeRecord } from "./bluesky";
 
-export interface Selection<T extends SubjectRecord = LikeRecord> {
+export interface Selection<T extends DatedRecord = LikeRecord> {
   old: T[];
   skipped: number;
 }
@@ -12,7 +12,7 @@ interface Dated<T> {
   time: number;
 }
 
-function parseCreatedAt(record: SubjectRecord): number {
+function parseCreatedAt(record: DatedRecord): number {
   // biome-ignore lint/suspicious/noUnnecessaryConditions: records from the network may lack a value
   const createdAt: unknown = record.value?.createdAt;
   return typeof createdAt === "string" ? Date.parse(createdAt) : Number.NaN;
@@ -26,7 +26,7 @@ function byOldestFirst<T>(a: Dated<T>, b: Dated<T>): number {
   return a.time - b.time;
 }
 
-export function selectOldRecords<T extends SubjectRecord>(
+export function selectOldRecords<T extends DatedRecord>(
   records: T[],
   runStart: number,
 ): Selection<T> {
