@@ -25,8 +25,9 @@ tasks:
       - bun scripts/stryker-diff.ts {{.CLI_ARGS}}
 
   typecheck:
-    desc: Typecheck with tsc
+    desc: Generate the Worker's types from wrangler.jsonc into src/cloudflare.d.ts, then typecheck with tsc
     cmds:
+      - bunx wrangler types src/cloudflare.d.ts
       - bunx tsc --noEmit
 
   lint:

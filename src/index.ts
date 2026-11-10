@@ -1,6 +1,4 @@
-import { createWorker, type Env, type LogLevel } from "./worker";
-
-export type { Env } from "./worker";
+import { createWorker, type LogLevel } from "./worker";
 
 // Workers Logs records the console method that wrote a line as its `$metadata.level`.
 const writers: Record<LogLevel, (message: string) => void> = {

@@ -12,13 +12,6 @@ const POST_COLLECTION = "app.bsky.feed.post" satisfies Collection;
 const THREADGATE_COLLECTION = "app.bsky.feed.threadgate" satisfies Collection;
 const POSTGATE_COLLECTION = "app.bsky.feed.postgate" satisfies Collection;
 
-export interface Env {
-  BLUESKY_DID: string;
-  BLUESKY_SERVER_URL: string;
-  // A missing Worker secret is rejected before listing.
-  BLUESKY_APP_PASSWORD?: string;
-}
-
 /** A report line's level; `src/index.ts` writes it with the `console` method of the same name. */
 export type LogLevel = "debug" | "info";
 
@@ -72,6 +65,7 @@ class OldRecordsCleaner {
     this.report({ found: old.length, deleted, skipped }, noun);
   }
 
+  // The generated Env declares the secret, but a Worker without it set is rejected before listing.
   private static requirePassword(env: Env): string {
     if (!env.BLUESKY_APP_PASSWORD) {
       throw new Error("BLUESKY_APP_PASSWORD is not set");
@@ -149,7 +143,7 @@ export function createWorker(deps: Dependencies) {
     log: deps.log,
   };
   return {
-    async scheduled(controller: { scheduledTime: number }, env: Env): Promise<void> {
+    async scheduled(controller: ScheduledController, env: Env): Promise<void> {
       await new OldRecordsCleaner(env, timedDeps).run(controller.scheduledTime);
     },
   };

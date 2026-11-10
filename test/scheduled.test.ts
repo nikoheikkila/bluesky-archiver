@@ -50,7 +50,7 @@ function newBluesky() {
  */
 function newRun(
   bluesky: FakeBluesky,
-  password: string | undefined,
+  password: string,
   fetch: typeof bluesky.fetch = bluesky.fetch,
 ) {
   const entries: LogEntry[] = [];
@@ -252,7 +252,8 @@ test("deletes only the datable old like and reports the undatable likes as skipp
 });
 
 test.each([
-  { label: "undefined", appPassword: undefined },
+  // The generated Env declares the secret as a string; an unset Worker secret is undefined at runtime.
+  { label: "undefined", appPassword: undefined as unknown as string },
   { label: "an empty string", appPassword: "" },
 ])("fails before any request when BLUESKY_APP_PASSWORD is $label", async ({ appPassword }) => {
   const bluesky = newBluesky();

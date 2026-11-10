@@ -14,7 +14,7 @@
       "!.idea",
       "!.agents",
       "!.claude",
-      "!worker-configuration.d.ts"
+      "!src/cloudflare.d.ts"
     ]
   },
   "formatter": {
