@@ -9,8 +9,9 @@ export default {
   // The measured baseline is 100%, so any surviving mutant fails the run.
   thresholds: { high: 100, low: 100, break: 100 },
   coverageAnalysis: "perTest",
-  // index.ts only binds the run to the global fetch and console.log. Killing its mutants would need
-  // a test that patches a global or reaches the real network, which the test style forbids.
+  // index.ts only binds the run to the global fetch and console. The integration tests exercise its
+  // fetch binding through MSW, but its log-level mapping is visible only on console, which the test
+  // style forbids spying on, so its mutants could not all be killed.
   mutate: ["src/**/*.ts", "!src/**/*.d.ts", "!src/index.ts"],
   reporters: ["clear-text", "progress", "html", "json"],
   htmlReporter: { fileName: "reports/mutation/index.html" },

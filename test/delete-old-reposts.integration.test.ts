@@ -1,12 +1,10 @@
 // Feature: feature/delete-old-reposts.feature
 // Scenario: Daily run deletes only reposts older than one year
-import { createScheduledController, env } from "cloudflare:test";
+import { env } from "cloudflare:workers";
 import { expect, test } from "vitest";
-import { createWorker, type LogEntry } from "../src/worker";
 import { DAY, HOUR, YEAR } from "./constants";
 import { createFakeBluesky } from "./fake-bluesky";
-
-const APP_PASSWORD = "test-app-password";
+import { deletesOf, runDailyWorker, serveBluesky } from "./network";
 
 test("Daily run deletes only reposts older than one year", async () => {
   const runStart = Date.parse("2026-11-08T03:00:00Z");
@@ -15,7 +13,7 @@ test("Daily run deletes only reposts older than one year", async () => {
   const bluesky = createFakeBluesky({
     did: env.BLUESKY_DID,
     baseUrl: env.BLUESKY_SERVER_URL,
-    appPassword: APP_PASSWORD,
+    appPassword: env.BLUESKY_APP_PASSWORD,
   });
   const elections = bluesky.addPost("a post about elections");
   const deleted = bluesky.addPost("a post that was deleted");
@@ -39,27 +37,12 @@ test("Daily run deletes only reposts older than one year", async () => {
   bluesky.deletePost(deleted);
   expect(bluesky.posts().map((post) => post.uri)).not.toContain(deleted.uri);
   expect(bluesky.reposts().map((repost) => repost.subject)).toContain(deleted.uri);
-  const entries: LogEntry[] = [];
-  const worker = createWorker({
-    fetch: bluesky.fetch,
-    log: (entry) => {
-      entries.push(entry);
-    },
-  });
-  const workerEnv = { ...env, BLUESKY_APP_PASSWORD: APP_PASSWORD };
+  serveBluesky(bluesky);
 
-  const controller = createScheduledController({ scheduledTime: runStart });
-  await worker.scheduled(controller, workerEnv);
+  await runDailyWorker(runStart);
 
-  expect(entries).toStrictEqual([
-    { level: "info", message: "No likes are older than one year" },
-    { level: "debug", message: `deleting repost ${electionsRepost.uri}` },
-    { level: "debug", message: `deleting repost ${deletedRepost.uri}` },
-    { level: "debug", message: `deleting repost ${footballRepost.uri}` },
-    { level: "info", message: "Deleted 3 of 3 reposts older than one year" },
-    { level: "info", message: "No posts are older than one year" },
-    { level: "info", message: "No reply settings are older than one year" },
-    { level: "info", message: "No quote settings are older than one year" },
-  ]);
   expect(bluesky.reposts().map((repost) => repost.subject)).toStrictEqual([cooking.uri, music.uri]);
+  expect(bluesky.receivedWrites()).toStrictEqual([
+    deletesOf("app.bsky.feed.repost", [electionsRepost, deletedRepost, footballRepost]),
+  ]);
 });

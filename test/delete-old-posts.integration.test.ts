@@ -1,12 +1,10 @@
 // Feature: feature/delete-old-posts.feature
 // Scenario: Daily run deletes only posts older than one year, with their reply and quote settings
-import { createScheduledController, env } from "cloudflare:test";
+import { env } from "cloudflare:workers";
 import { expect, test } from "vitest";
-import { createWorker, type LogEntry } from "../src/worker";
 import { DAY, HOUR, YEAR } from "./constants";
 import { createFakeBluesky, type NewAccountPost } from "./fake-bluesky";
-
-const APP_PASSWORD = "test-app-password";
+import { deletesOf, runDailyWorker, serveBluesky } from "./network";
 
 test("Daily run deletes only posts older than one year, with their reply and quote settings", async () => {
   const runStart = Date.parse("2026-11-08T03:00:00Z");
@@ -15,7 +13,7 @@ test("Daily run deletes only posts older than one year, with their reply and quo
   const bluesky = createFakeBluesky({
     did: env.BLUESKY_DID,
     baseUrl: env.BLUESKY_SERVER_URL,
-    appPassword: APP_PASSWORD,
+    appPassword: env.BLUESKY_APP_PASSWORD,
   });
   const deleted = bluesky.addPost("a post that was deleted");
   const football = bluesky.addPost("a post about football");
@@ -50,36 +48,10 @@ test("Daily run deletes only posts older than one year, with their reply and quo
     bluesky.addQuoteSettings({ post, createdAt: post.createdAt }),
   );
   const [cooking, music] = added.slice(3);
-  const entries: LogEntry[] = [];
-  const worker = createWorker({
-    fetch: bluesky.fetch,
-    log: (entry) => {
-      entries.push(entry);
-    },
-  });
-  const workerEnv = { ...env, BLUESKY_APP_PASSWORD: APP_PASSWORD };
+  serveBluesky(bluesky);
 
-  const controller = createScheduledController({ scheduledTime: runStart });
-  await worker.scheduled(controller, workerEnv);
+  await runDailyWorker(runStart);
 
-  expect(entries).toStrictEqual([
-    { level: "info", message: "No likes are older than one year" },
-    { level: "info", message: "No reposts are older than one year" },
-    ...added
-      .slice(0, 3)
-      .map((post) => ({ level: "debug" as const, message: `deleting post ${post.uri}` })),
-    { level: "info", message: "Deleted 3 of 3 posts older than one year" },
-    ...replySettings.slice(0, 3).map((settings) => ({
-      level: "debug" as const,
-      message: `deleting reply settings ${settings.uri}`,
-    })),
-    { level: "info", message: "Deleted 3 of 3 reply settings older than one year" },
-    ...quoteSettings.slice(0, 3).map((settings) => ({
-      level: "debug" as const,
-      message: `deleting quote settings ${settings.uri}`,
-    })),
-    { level: "info", message: "Deleted 3 of 3 quote settings older than one year" },
-  ]);
   expect(bluesky.accountPosts().map((post) => post.uri)).toStrictEqual([cooking?.uri, music?.uri]);
   expect(bluesky.replySettings().map((settings) => settings.post)).toStrictEqual([
     cooking?.uri,
@@ -88,5 +60,10 @@ test("Daily run deletes only posts older than one year, with their reply and quo
   expect(bluesky.quoteSettings().map((settings) => settings.post)).toStrictEqual([
     cooking?.uri,
     music?.uri,
+  ]);
+  expect(bluesky.receivedWrites()).toStrictEqual([
+    deletesOf("app.bsky.feed.post", added.slice(0, 3)),
+    deletesOf("app.bsky.feed.threadgate", replySettings.slice(0, 3)),
+    deletesOf("app.bsky.feed.postgate", quoteSettings.slice(0, 3)),
   ]);
 });

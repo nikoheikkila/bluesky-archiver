@@ -19,7 +19,9 @@ slices needed, in the order that kept every chunk safe to deploy.
 
 - `test/fake-bluesky.ts`: store the kind, add storage-only harness methods (`add<Kind>()`, the
   bulk `add<Kind>s()` for seeding without loops, and `<kind>s()`) in the acceptance step so the
-  acceptance test compiles, then serve it through
+  acceptance test compiles. The acceptance test is `test/<slug>.integration.test.ts`: it seeds the
+  fake, calls `serveBluesky()` and `runDailyWorker()` from `test/network.ts`, and asserts the fake's
+  state and `receivedWrites()` (built with `deletesOf()`). Then serve the kind through
   `listRecords` with the same paging as likes (a cursor on every non-empty page, then an empty page
   without one), and accept its deletes in `applyWrites`.
 - Validate every served record against its record lexicon from `@bsky/sdk`, keeping the

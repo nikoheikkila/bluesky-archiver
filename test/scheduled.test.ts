@@ -1,6 +1,7 @@
 // Feature: feature/delete-old-likes.feature
 // Cycle 5: wire the daily run.
-import { createScheduledController, env } from "cloudflare:test";
+import { createScheduledController } from "cloudflare:test";
+import { env } from "cloudflare:workers";
 import { expect, test } from "vitest";
 import { createWorker, type LogEntry } from "../src/worker";
 import { DAY, HOUR } from "./constants";

@@ -1,5 +1,6 @@
 // Review fix: every request the Worker sends gets a timeout that aborts it.
-import { createScheduledController, env } from "cloudflare:test";
+import { createScheduledController } from "cloudflare:test";
+import { env } from "cloudflare:workers";
 import { expect, test } from "vitest";
 import type { Fetch } from "../src/bluesky";
 import { REQUEST_TIMEOUT_MS, withRequestTimeout } from "../src/timeout";

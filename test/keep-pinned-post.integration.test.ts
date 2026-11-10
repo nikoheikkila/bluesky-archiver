@@ -1,12 +1,10 @@
 // Feature: feature/keep-pinned-post.feature
 // Scenario: Daily run keeps the pinned post when every other post is deleted
-import { createScheduledController, env } from "cloudflare:test";
+import { env } from "cloudflare:workers";
 import { expect, test } from "vitest";
-import { createWorker, type LogEntry } from "../src/worker";
 import { DAY, HOUR, YEAR } from "./constants";
 import { createFakeBluesky } from "./fake-bluesky";
-
-const APP_PASSWORD = "test-app-password";
+import { deletesOf, runDailyWorker, serveBluesky } from "./network";
 
 test("Daily run keeps the pinned post when every other post is deleted", async () => {
   const runStart = Date.parse("2026-11-08T03:00:00Z");
@@ -15,7 +13,7 @@ test("Daily run keeps the pinned post when every other post is deleted", async (
   const bluesky = createFakeBluesky({
     did: env.BLUESKY_DID,
     baseUrl: env.BLUESKY_SERVER_URL,
-    appPassword: APP_PASSWORD,
+    appPassword: env.BLUESKY_APP_PASSWORD,
   });
   const music = bluesky.addPost("a post about music");
   const elections = bluesky.addAccountPost({
@@ -35,26 +33,12 @@ test("Daily run keeps the pinned post when every other post is deleted", async (
     parent: music.uri,
   });
   bluesky.pinPost(welcome);
-  const entries: LogEntry[] = [];
-  const worker = createWorker({
-    fetch: bluesky.fetch,
-    log: (entry) => {
-      entries.push(entry);
-    },
-  });
-  const workerEnv = { ...env, BLUESKY_APP_PASSWORD: APP_PASSWORD };
+  serveBluesky(bluesky);
 
-  const controller = createScheduledController({ scheduledTime: runStart });
-  await worker.scheduled(controller, workerEnv);
+  await runDailyWorker(runStart);
 
-  expect(entries).toStrictEqual([
-    { level: "info", message: "No likes are older than one year" },
-    { level: "info", message: "No reposts are older than one year" },
-    { level: "debug", message: `deleting post ${elections.uri}` },
-    { level: "debug", message: `deleting post ${reply.uri}` },
-    { level: "info", message: "Deleted 2 of 2 posts older than one year" },
-    { level: "info", message: "No reply settings are older than one year" },
-    { level: "info", message: "No quote settings are older than one year" },
-  ]);
   expect(bluesky.accountPosts().map((post) => post.uri)).toStrictEqual([welcome.uri]);
+  expect(bluesky.receivedWrites()).toStrictEqual([
+    deletesOf("app.bsky.feed.post", [elections, reply]),
+  ]);
 });
