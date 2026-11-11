@@ -1,14 +1,8 @@
-import type { Fetch } from "./bluesky";
-import { discardBody, readJson } from "./body";
+import type { Repo } from "./bluesky";
+import { failRequest, readJson } from "./body";
 
 const GET_RECORD = "com.atproto.repo.getRecord";
 const PROFILE_COLLECTION = "app.bsky.actor.profile";
-
-export interface ReadPinnedPostOptions {
-  baseUrl: string;
-  did: string;
-  fetch: Fetch;
-}
 
 interface ErrorBody {
   error?: string;
@@ -18,12 +12,12 @@ interface ProfileBody {
   value?: { pinnedPost?: { uri: string } };
 }
 
-export async function readPinnedPost(options: ReadPinnedPostOptions): Promise<string | undefined> {
-  const url = new URL(`/xrpc/${GET_RECORD}`, options.baseUrl);
-  url.searchParams.set("repo", options.did);
+export async function readPinnedPost({ baseUrl, did, fetch }: Repo): Promise<string | undefined> {
+  const url = new URL(`/xrpc/${GET_RECORD}`, baseUrl);
+  url.searchParams.set("repo", did);
   url.searchParams.set("collection", PROFILE_COLLECTION);
   url.searchParams.set("rkey", "self");
-  const response = await options.fetch(url);
+  const response = await fetch(url);
   if (response.ok) {
     const body = await readJson<ProfileBody>(response);
     // Stryker disable next-line OptionalChaining: getRecord requires value, so it is never undefined.
@@ -33,8 +27,7 @@ export async function readPinnedPost(options: ReadPinnedPostOptions): Promise<st
     return undefined;
   }
   // A body readJson already read is left as it is; an unread one is cancelled.
-  await discardBody(response);
-  throw new Error(`${GET_RECORD} failed with HTTP ${response.status}`);
+  return failRequest(response, GET_RECORD);
 }
 
 async function isRecordNotFound(response: Response): Promise<boolean> {

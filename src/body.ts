@@ -47,6 +47,12 @@ export async function discardBody(response: Response): Promise<void> {
   await response.body?.cancel().catch(() => undefined);
 }
 
+/** Releases a non-OK response's body, then fails the run with the request's name and status. */
+export async function failRequest(response: Response, name: string): Promise<never> {
+  await discardBody(response);
+  throw new Error(`${name} failed with HTTP ${response.status}`);
+}
+
 function tooLarge(maxBytes: number): Error {
   return new Error(`response body exceeds ${maxBytes} bytes`);
 }

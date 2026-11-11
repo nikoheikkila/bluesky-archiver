@@ -36,18 +36,18 @@ slices needed, in the order that kept every chunk safe to deploy.
 
 The pipeline is already collection-agnostic. A new kind needs these changes:
 
-- `src/domain-types.ts`: add the record type to the `SubjectRecord` union, which extends `Collection`.
-  Records without a `subject` do not fit `SubjectRecord`; the posts slice has widened the type, so
-  such a kind only joins `Collection` and is typed as a dated record (see the notes below).
-- `src/report.ts`: extend `RecordNoun`. `formatRecordLine` prints `deleting <noun> <record URI>`
+- `src/domain-types.ts`: add the collection and its record type to `RecordByCollection`;
+  `Collection` is its key set. A subject record (like, repost) uses `SubjectRecordOf`, any other
+  kind `DatedRecordOf` (see the notes below).
+- `src/report.ts`: extend `RecordNoun`. `recordEntry` prints `deleting <noun> <record URI>`
   from the record's own `uri`, so it fits any kind, subject or not.
 - `src/select.ts` (`selectOldRecords`) and `src/delete.ts` (`deleteRecords`) take any collection
   as they are.
 
 ## 4. Wiring
 
-- `src/worker.ts`: `OldRecordsCleaner.run()` calls `clean(collection, noun, runStart)` once per
-  kind, in order. Add the new kind after the existing ones. The session is shared, so login still
+- `src/worker.ts`: `run()` loops over the `KINDS` table of `{ collection, noun }`, in order. Add
+  the new kind after the existing ones. The session is shared, so login still
   happens at most once, and a failure stops the kinds that follow.
 - Only this cycle changes what the deployed Worker does, so keep it last and commit it on its own.
 

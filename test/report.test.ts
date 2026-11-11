@@ -1,14 +1,14 @@
 // Feature: feature/delete-old-likes.feature
 // Cycle 5: format the report.
 import { expect, test } from "vitest";
-import type { DatedRecordOf, LikeRecord, RepostRecord } from "../src/domain-types";
-import {
-  formatDeletionSummary,
-  formatLikeLine,
-  formatRecordLine,
-  recordEntry,
-  summaryEntries,
-} from "../src/report";
+import type { DatedRecord, DatedRecordOf, LikeRecord, RepostRecord } from "../src/domain-types";
+import { type DeletionSummary, type RecordNoun, recordEntry, summaryEntries } from "../src/report";
+
+const formatRecordLine = (record: DatedRecord, noun: RecordNoun) =>
+  recordEntry(record, noun).message;
+
+const formatDeletionSummary = (summary: DeletionSummary, noun: RecordNoun = "like") =>
+  summaryEntries(summary, noun).map((entry) => entry.message);
 
 function like(id: string, createdAt: string): LikeRecord {
   const uri = `at://did:plc:fakeaccount000000000000/app.bsky.feed.like/${id}`;
@@ -47,7 +47,7 @@ test.each([
   { name: "first like", subject: first, expected: firstLine },
   { name: "second like", subject: second, expected: secondLine },
 ])("formats the $name as a deletion report line", ({ subject, expected }) => {
-  expect(formatLikeLine(subject)).toStrictEqual(expected);
+  expect(formatRecordLine(subject, "like")).toStrictEqual(expected);
 });
 
 test.each([
@@ -56,10 +56,6 @@ test.each([
 ])("formats the $name as a record line", ({ subject, noun, expected }) => {
   expect(formatRecordLine(subject, noun)).toStrictEqual(expected);
   expect(formatRecordLine(subject, noun).endsWith(".")).toBe(false);
-});
-
-test("formats a record line as a like when no noun is given", () => {
-  expect(formatRecordLine(first)).toStrictEqual(firstLine);
 });
 
 const deletionSummaries = [

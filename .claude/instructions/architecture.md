@@ -3,7 +3,7 @@
 A run starts with one profile read (`readPinnedPost`, a `getRecord` of
 `app.bsky.actor.profile/self`) that finds the pinned post. The pipeline per kind is
 `listRecords → selectOldRecords → login (createSession) → deleteRecords (applyWrites) →
-recordEntry / summaryEntries → log`, built by `createWorker()` in `src/worker.ts` and
+recordEntry / summaryEntries → log`, built by `createWorker()` in `src/worker.ts` as one loop over its `KINDS` table and
 bound to the real `fetch` and `console` in `src/index.ts`.
 
 The kinds run in order in one
@@ -26,44 +26,43 @@ deleted.
 - `src/bluesky.ts` — `listRecords({ baseUrl, did, collection, fetch })` pages through the public
   `com.atproto.repo.listRecords` endpoint for any collection (`limit=100`) until an empty page or a
   missing cursor. It scans every page, because record order follows record keys, not `createdAt`.
-  `LIKE_COLLECTION` names the likes collection, and `listLikes()` is a thin wrapper over
-  `listRecords` for it. Likes and reposts come back as subject records; posts, reply settings and
+  Likes and reposts come back as subject records; posts, reply settings and
   quote settings have no `subject`, so they come back as any dated record (`RecordIn<C>`). It also
-  exports the `Fetch` type every request goes through.
+  exports the `Fetch` type every request goes through, and `Repo` (`{ baseUrl, did, fetch }`), the
+  options shared by `listRecords`, `readPinnedPost` and `login`.
 - `src/domain-types.ts` — type-only, emits nothing at runtime: the Bluesky lexicon record types
   (`SubjectRecordOf`, `LikeRecord`, `RepostRecord`, `SubjectRecord`, `DatedRecordOf`, `DatedRecord`,
-  `Collection`, `RecordIn`). A subject record is a like or repost; a dated record is any record
+  `Collection`, `RecordIn`). `Collection` is the key set of the record lookup, so a new kind is
+  added in one place. A subject record is a like or repost; a dated record is any record
   with a `createdAt`, which also covers posts, reply settings and quote settings. `RecordIn<C>`
   maps each collection to its own record type through a lookup, so an unnarrowed `Collection` gives
   the union of all five record types. `DatedRecord`'s `createdAt` is optional, because network
   records may lack it. Modules import them with `import type`.
 - `src/select.ts` — `selectOldRecords(records, runStart)` holds the one age rule and returns the
   old records oldest first. A record with a missing or unparseable `createdAt` is counted as
-  skipped. `selectOldLikes` is a thin wrapper over it.
+  skipped.
 - `src/session.ts` — `login({ baseUrl, did, password, fetch })` returns `fetchHandler(path, init)`,
   the atproto `Agent` shape. The deletion code depends only on `fetchHandler`, not on a raw token.
 - `src/delete.ts` — `deleteRecords()` batches `com.atproto.repo.applyWrites` deletes for any
   collection, at most 200 per call. It is generic in its collection, so the records must be of that
   collection's type. Before the first `applyWrites`, it refuses a record whose URI is not
-  `at://<did>/<collection>/<rkey>`, so no request is sent for it. `deleteLikes()` is a thin wrapper
-  over it.
+  `at://<did>/<collection>/<rkey>`, so no request is sent for it.
 - `src/profile.ts` — `readPinnedPost({ baseUrl, did, fetch })` reads `app.bsky.actor.profile/self`
   with one unauthenticated `com.atproto.repo.getRecord` and returns the URI in
   `value.pinnedPost.uri`, or nothing; the CID is ignored. A missing profile (HTTP 400
   `RecordNotFound`) or one without `pinnedPost` pins nothing, and any other non-OK response throws.
   `withoutPinnedPost(records, pinnedUri)` drops the record whose `uri` equals the pinned URI. The
-  posts kind uses it before selection, so the pinned post is neither found nor skipped, and is not
-  logged.
-- `src/report.ts` — `formatRecordLine()`, `formatLikeLine()` and `formatDeletionSummary()`, whose
-  noun is "like", "repost", "post", "reply settings" or "quote settings". The settings nouns never
-  change form. `formatRecordLine(record, noun)` prints the URI of the deleted record itself, not its
-  subject or its post. Wording is fixed by the spec. `recordEntry()` and `summaryEntries()` return
-  the same lines as `ReportEntry` (`{ message, fields }`), with the `ReportFields` the log writes;
-  `formatDeletionSummary()` is their messages only.
+  worker applies it to every kind before selection (the pinned URI names a post, so it only ever
+  matches in the posts kind), so the pinned post is neither found nor skipped, and is not logged.
+- `src/report.ts` — `recordEntry(record, noun)` and `summaryEntries(summary, noun)` return report
+  lines as `ReportEntry` (`{ message, fields }`), whose noun is "like", "repost", "post", "reply
+  settings" or "quote settings". The settings nouns never change form. A record line prints the URI
+  of the deleted record itself, not its subject or its post. Wording is fixed by the spec.
 - `src/body.ts` — `readJson(response, maxBytes)` reads a JSON body of at most `MAX_RESPONSE_BYTES`
   (8 MiB; a 100-record page is about 100 KB). A body declared larger by `Content-Length`, or streamed
   past the cap, is cancelled and rejected with `response body exceeds <n> bytes`; invalid JSON
-  rejects with `SyntaxError`, as `response.json()` does. `listRecords`, `login` and
+  rejects with `SyntaxError`, as `response.json()` does. `failRequest(response, name)` discards a
+  non-OK body and throws `<name> failed with HTTP <status>`. `listRecords`, `login` and
   `readPinnedPost` read every body through it, never with `response.json()`. `discardBody(response)`
   cancels a body that will not be read, ignoring a body already read and a failed cancel, so a
   non-OK `listRecords`, `createSession` or `getRecord` releases its connection before the run fails.

@@ -7,7 +7,7 @@ export interface DeletionSummary {
 }
 
 /** The queryable fields of a report line; Workers Logs indexes each field of a JSON log line. */
-export type ReportFields =
+type ReportFields =
   | { event: "record_deleted"; kind: RecordNoun; uri: string }
   | { event: "records_skipped"; kind: RecordNoun; skipped: number }
   | ({ event: "kind_summary"; kind: RecordNoun } & DeletionSummary);
@@ -32,15 +32,9 @@ function plural(count: number, noun: RecordNoun): string {
   return count === 1 ? noun : plurals[noun];
 }
 
-export function formatRecordLine(record: DatedRecord, noun: RecordNoun = "like"): string {
-  return `deleting ${noun} ${record.uri}`;
-}
-
-export const formatLikeLine = formatRecordLine;
-
 export function recordEntry(record: DatedRecord, noun: RecordNoun): ReportEntry {
   return {
-    message: formatRecordLine(record, noun),
+    message: `deleting ${noun} ${record.uri}`,
     fields: { event: "record_deleted", kind: noun, uri: record.uri },
   };
 }
@@ -62,11 +56,4 @@ export function summaryEntries(summary: DeletionSummary, noun: RecordNoun): Repo
     fields: { event: "kind_summary", kind: noun, found, deleted, skipped },
   });
   return entries;
-}
-
-export function formatDeletionSummary(
-  summary: DeletionSummary,
-  noun: RecordNoun = "like",
-): string[] {
-  return summaryEntries(summary, noun).map((entry) => entry.message);
 }

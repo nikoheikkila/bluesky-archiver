@@ -2,7 +2,7 @@
 // Cycle 4: pick the likes older than one year.
 import { expect, test } from "vitest";
 import type { DatedRecord, LikeRecord, RepostRecord } from "../src/domain-types";
-import { selectOldLikes, selectOldRecords } from "../src/select";
+import { selectOldRecords } from "../src/select";
 import { DAY, HOUR, YEAR } from "./constants";
 
 function likeCreatedAt(id: string, createdAt: string): LikeRecord {
@@ -26,7 +26,7 @@ test("selects the likes older than one year, oldest first, and skips those witho
   delete withoutCreatedAt.value.createdAt;
   const unparseable = likeCreatedAt("g", "not-a-date");
 
-  const result = selectOldLikes(
+  const result = selectOldRecords(
     [
       yesterday,
       twoYears,
@@ -51,7 +51,7 @@ test("does not select a like created exactly one year before the run starts", ()
   const runStart = Date.parse("2026-11-08T03:00:00Z");
   const exactlyAYear = likeCreatedAt("h", new Date(runStart - YEAR).toISOString());
 
-  const result = selectOldLikes([exactlyAYear], runStart);
+  const result = selectOldRecords([exactlyAYear], runStart);
 
   expect(result.old).toStrictEqual([]);
   expect(result.skipped).toBe(0);
@@ -106,7 +106,7 @@ test.each([
   const runStart = Date.parse("2026-11-08T03:00:00Z");
   const notAString = likeCreatedAt("i", createdAt as unknown as string);
 
-  const result = selectOldLikes([notAString], runStart);
+  const result = selectOldRecords([notAString], runStart);
 
   expect(result.old).toStrictEqual([]);
   expect(result.skipped).toBe(1);
@@ -116,7 +116,7 @@ test("skips and never selects a like that has no value", () => {
   const runStart = Date.parse("2026-11-08T03:00:00Z");
   const { uri, cid } = likeCreatedAt("j", "2020-01-01T00:00:00Z");
 
-  const result = selectOldLikes([{ uri, cid } as unknown as LikeRecord], runStart);
+  const result = selectOldRecords([{ uri, cid } as unknown as LikeRecord], runStart);
 
   expect(result.old).toStrictEqual([]);
   expect(result.skipped).toBe(1);

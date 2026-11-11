@@ -1,7 +1,7 @@
 // Feature: feature/delete-old-likes.feature
 // Cycles 2-3: list every like across all pages; fail loudly when a request fails.
 import { expect, test } from "vitest";
-import { listLikes, listRecords } from "../src/bluesky";
+import { listRecords } from "../src/bluesky";
 import { createFakeBluesky, type FakeBluesky } from "./fake-bluesky";
 
 const DID = "did:plc:fakeaccount000000000000";
@@ -25,7 +25,12 @@ test.each([
 ])("lists $likeCount likes in $requestCount requests", async ({ likeCount, requestCount }) => {
   const { bluesky, likes } = blueskyWithLikes(likeCount);
 
-  const records = await listLikes({ baseUrl: BASE_URL, did: DID, fetch: bluesky.fetch });
+  const records = await listRecords({
+    collection: "app.bsky.feed.like",
+    baseUrl: BASE_URL,
+    did: DID,
+    fetch: bluesky.fetch,
+  });
 
   expect(records).toHaveLength(likeCount);
   expect(records.map((record) => record.uri).sort()).toStrictEqual(
@@ -39,7 +44,12 @@ test.each([
 test("asks the server only for the configured account's likes", async () => {
   const { bluesky } = blueskyWithLikes(3);
 
-  const records = await listLikes({ baseUrl: BASE_URL, did: DID, fetch: bluesky.fetch });
+  const records = await listRecords({
+    collection: "app.bsky.feed.like",
+    baseUrl: BASE_URL,
+    did: DID,
+    fetch: bluesky.fetch,
+  });
 
   expect(records).toHaveLength(3);
   expect(searchParams(bluesky, "repo")).toStrictEqual([DID, DID]);
@@ -53,7 +63,12 @@ test("fails naming the request and HTTP 400 when asked for another account's lik
   const { bluesky } = blueskyWithLikes(3);
 
   await expect(
-    listLikes({ baseUrl: BASE_URL, did: OTHER_DID, fetch: bluesky.fetch }),
+    listRecords({
+      collection: "app.bsky.feed.like",
+      baseUrl: BASE_URL,
+      did: OTHER_DID,
+      fetch: bluesky.fetch,
+    }),
   ).rejects.toThrow(/com\.atproto\.repo\.listRecords.*400/);
 });
 
@@ -61,9 +76,14 @@ test("fails loudly naming the request when the server answers a page with an err
   const { bluesky } = blueskyWithLikes(250);
   bluesky.failPage({ cursor: "100", status: 500 });
 
-  await expect(listLikes({ baseUrl: BASE_URL, did: DID, fetch: bluesky.fetch })).rejects.toThrow(
-    /com\.atproto\.repo\.listRecords.*500/,
-  );
+  await expect(
+    listRecords({
+      collection: "app.bsky.feed.like",
+      baseUrl: BASE_URL,
+      did: DID,
+      fetch: bluesky.fetch,
+    }),
+  ).rejects.toThrow(/com\.atproto\.repo\.listRecords.*500/);
 });
 
 test.each([
@@ -128,8 +148,13 @@ test("cancels the unread body of a failed page before rejecting", async () => {
   const cancelled: unknown[] = [];
   const serverError = async () => openErrorResponse(500, cancelled);
 
-  await expect(listLikes({ baseUrl: BASE_URL, did: DID, fetch: serverError })).rejects.toThrow(
-    /com\.atproto\.repo\.listRecords.*500/,
-  );
+  await expect(
+    listRecords({
+      collection: "app.bsky.feed.like",
+      baseUrl: BASE_URL,
+      did: DID,
+      fetch: serverError,
+    }),
+  ).rejects.toThrow(/com\.atproto\.repo\.listRecords.*500/);
   expect(cancelled).toHaveLength(1);
 });

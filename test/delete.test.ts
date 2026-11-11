@@ -1,7 +1,7 @@
 // Feature: feature/delete-old-likes.feature
 // Cycle 3: delete likes in batches.
 import { expect, test } from "vitest";
-import { deleteLikes, deleteRecords } from "../src/delete";
+import { deleteRecords } from "../src/delete";
 import type { Collection, DatedRecordOf, LikeRecord, SubjectRecord } from "../src/domain-types";
 import { login } from "../src/session";
 import { createFakeBluesky, type NewLike } from "./fake-bluesky";
@@ -115,7 +115,11 @@ test("consumes or cancels every applyWrites response body, on success and on fai
   const fetchHandler = async () => responses[calls++];
 
   await expect(
-    deleteLikes(likes, { did: DID, fetchHandler, onBatchDeleted: () => {} }),
+    deleteRecords("app.bsky.feed.like", likes, {
+      did: DID,
+      fetchHandler,
+      onBatchDeleted: () => {},
+    }),
   ).rejects.toThrow("500");
 
   expect(
@@ -158,7 +162,11 @@ test("sends applyWrites as JSON", async () => {
     return Response.json({ results: [] });
   };
 
-  await deleteLikes([oneLike()], { did: DID, fetchHandler, onBatchDeleted: () => {} });
+  await deleteRecords("app.bsky.feed.like", [oneLike()], {
+    did: DID,
+    fetchHandler,
+    onBatchDeleted: () => {},
+  });
 
   expect(inits.map((init) => new Headers(init?.headers).get("content-type"))).toStrictEqual([
     "application/json",
@@ -170,7 +178,7 @@ test("accepts an applyWrites response without a body", async () => {
   const answerWithoutBody = async () => new Response(null, { status: 200 });
 
   await expect(
-    deleteLikes([oneLike()], {
+    deleteRecords("app.bsky.feed.like", [oneLike()], {
       did: DID,
       fetchHandler: answerWithoutBody,
       onBatchDeleted: (batch) => {
@@ -249,7 +257,7 @@ test.each([
   };
 
   await expect(
-    deleteLikes([...valid, likeAt(uri, 450)], {
+    deleteRecords("app.bsky.feed.like", [...valid, likeAt(uri, 450)], {
       did: DID,
       fetchHandler,
       onBatchDeleted: (batch) => {
