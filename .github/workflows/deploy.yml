@@ -1,4 +1,4 @@
-name: Deploy
+name: Delivery Pipeline
 
 on:
   push:
@@ -22,7 +22,7 @@ jobs:
         uses: go-task/setup-task@v2
 
       - name: Install dependencies
-        run: bun install --frozen-lockfile
+        run: task install
 
       - name: Lint
         run: task lint
@@ -54,8 +54,11 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
 
+      - name: Setup Task
+        uses: go-task/setup-task@v2
+
       - name: Install dependencies
-        run: bun install --frozen-lockfile
+        run: task install
 
       - name: Deploy
         uses: cloudflare/wrangler-action@v4
