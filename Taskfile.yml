@@ -4,6 +4,14 @@ vars:
   OP: op run --env-file=.env --
 
 tasks:
+  install:
+    desc: Install packages with Bun
+    sources:
+      - package.json
+      - bun.lock
+    run: once
+    cmd: bun install --frozen-lockfile
+
   test:
     desc: Run the Vitest suite inside workerd (extra args go to vitest, e.g. task test -- test/select.test.ts)
     cmds:
@@ -35,7 +43,7 @@ tasks:
     cmds:
       - bunx biome check .
 
-  lint:fix:
+  format:
     desc: Apply Biome fixes
     cmds:
       - bunx biome check --write .
@@ -60,6 +68,13 @@ tasks:
       - task: op
         vars:
           command: bunx wrangler deploy
+
+  dry-run:
+    desc: Test worker deployment in a dry-run mode on a temporary directory
+    cmd: bunx wrangler deploy --dry-run --outdir {{ .dir }}
+    vars:
+      dir:
+        sh: mktemp -d
 
   logs:
     desc: Stream the deployed Worker's logs (pretty), reconnecting when the session ends
