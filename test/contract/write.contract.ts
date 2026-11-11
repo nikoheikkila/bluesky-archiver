@@ -3,17 +3,19 @@
 // app.bsky.feed.postgate). Holds for the fake; the default suite never sends it to the real server.
 import { expect } from "vitest";
 import type { Fetch } from "../../src/bluesky";
-import { type ListedCollection, walkListRecords } from "./list-records.contract";
+import type { Collection } from "../../src/domain-types";
+import { CID, rkeyOf } from "../constants";
+import { walkListRecords } from "./list-records.contract";
 
 export interface WriteTarget {
   baseUrl: string;
   did: string;
   appPassword: string;
   /** URIs of exactly three records of `collection`, in this order. */
-  likeUris: [string, string, string];
+  recordUris: [string, string, string];
   fetch: Fetch;
   /** Defaults to app.bsky.feed.like. */
-  collection?: ListedCollection;
+  collection?: Collection;
 }
 
 interface SessionResponse {
@@ -24,10 +26,6 @@ interface SessionResponse {
 }
 
 const MAX_WRITES = 200;
-
-function rkeyOf(uri: string): string {
-  return uri.split("/").at(-1) as string;
-}
 
 function deleteWrite(rkey: string, collection = "app.bsky.feed.like") {
   return { $type: "com.atproto.repo.applyWrites#delete", collection, rkey };
@@ -76,7 +74,7 @@ async function postWrites(
   });
 }
 
-async function remainingLikeUris(target: WriteTarget): Promise<string[]> {
+async function remainingUris(target: WriteTarget): Promise<string[]> {
   const pages = await walkListRecords({
     baseUrl: target.baseUrl,
     did: target.did,
@@ -88,32 +86,28 @@ async function remainingLikeUris(target: WriteTarget): Promise<string[]> {
 }
 
 export async function walkWrites(target: WriteTarget): Promise<{ afterDelete: string[] }> {
-  const [first, second, third] = target.likeUris;
+  const [first, second, third] = target.recordUris;
 
   const session = await createSession(target);
 
   const deleted = await applyWrites(target, [rkeyOf(first), rkeyOf(second)], session.accessJwt);
   expect(deleted.status, "applyWrites deleting 2 of 3 records status").toBe(200);
-  const afterDelete = await remainingLikeUris(target);
+  const afterDelete = await remainingUris(target);
   expect(afterDelete, "only the third record remains after deleting 2 of 3").toStrictEqual([third]);
 
   const tooMany = [
     rkeyOf(third),
     ...Array.from({ length: MAX_WRITES }, (_, index) => `absent${index}`),
   ];
-  expect(tooMany.length, "the oversized batch exceeds the 200 writes limit").toBe(MAX_WRITES + 1);
   const oversized = await applyWrites(target, tooMany, session.accessJwt);
   expect(oversized.status, "applyWrites with 201 deletes status").toBe(400);
-  expect(
-    await remainingLikeUris(target),
-    "nothing is deleted by the oversized batch",
-  ).toStrictEqual([third]);
+  expect(await remainingUris(target), "nothing is deleted by the oversized batch").toStrictEqual([
+    third,
+  ]);
 
   const anonymous = await applyWrites(target, [rkeyOf(third)]);
   expect(anonymous.status, "applyWrites without a token status").toBe(401);
-  expect(await remainingLikeUris(target), "nothing is deleted without a token").toStrictEqual([
-    third,
-  ]);
+  expect(await remainingUris(target), "nothing is deleted without a token").toStrictEqual([third]);
 
   return { afterDelete };
 }
@@ -125,12 +119,10 @@ export interface ForbiddenWrite {
   write(target: WriteTarget): object;
 }
 
-const LIKE_CID = "bafyreie5737gdxlw5i64vzichcalba3z2v5n6icifvx5xytvske7mr3hpm";
-
 function likeValue(target: WriteTarget) {
   return {
     $type: "app.bsky.feed.like",
-    subject: { uri: target.likeUris[1], cid: LIKE_CID },
+    subject: { uri: target.recordUris[1], cid: CID },
     createdAt: "2025-01-01T00:00:00.000Z",
   };
 }
@@ -149,7 +141,7 @@ export const FORBIDDEN_WRITES: ForbiddenWrite[] = [
     write: (target) => ({
       $type: "com.atproto.repo.applyWrites#update",
       collection: "app.bsky.feed.like",
-      rkey: rkeyOf(target.likeUris[1]),
+      rkey: rkeyOf(target.recordUris[1]),
       value: likeValue(target),
     }),
   },
@@ -171,13 +163,13 @@ export async function walkRejectedWrite(
 
   const response = await postWrites(
     target,
-    [deleteWrite(rkeyOf(target.likeUris[0])), forbidden.write(target)],
+    [deleteWrite(rkeyOf(target.recordUris[0])), forbidden.write(target)],
     session.accessJwt,
   );
 
   expect(response.status, `applyWrites carrying ${forbidden.name} status`).toBe(400);
   expect(
-    await remainingLikeUris(target),
+    await remainingUris(target),
     `nothing is applied when the request carries ${forbidden.name}`,
-  ).toStrictEqual(target.likeUris);
+  ).toStrictEqual(target.recordUris);
 }

@@ -1,42 +1,34 @@
 // Feature: feature/delete-old-posts.feature
 // Scenario: Daily run deletes only posts older than one year, with their reply and quote settings
-import { env } from "cloudflare:workers";
 import { expect, test } from "vitest";
-import { DAY, HOUR, YEAR } from "./constants";
-import { createFakeBluesky, type NewAccountPost } from "./fake-bluesky";
-import { deletesOf, runDailyWorker, serveBluesky } from "./network";
+import { createdAgo, DAY, HOUR, RUN_START, YEAR } from "./constants";
+import type { NewAccountPost } from "./fake-bluesky";
+import { createEnvBluesky, deletesOf, runDailyWorker, serveBluesky } from "./network";
 
 test("Daily run deletes only posts older than one year, with their reply and quote settings", async () => {
-  const runStart = Date.parse("2026-11-08T03:00:00Z");
-  const createdBefore = (ms: number) => new Date(runStart - ms).toISOString();
-
-  const bluesky = createFakeBluesky({
-    did: env.BLUESKY_DID,
-    baseUrl: env.BLUESKY_SERVER_URL,
-    appPassword: env.BLUESKY_APP_PASSWORD,
-  });
+  const bluesky = createEnvBluesky();
   const deleted = bluesky.addPost("a post that was deleted");
   const football = bluesky.addPost("a post about football");
   bluesky.deletePost(deleted);
   const posts: NewAccountPost[] = [
-    { kind: "plain", text: "a post about elections", createdAt: createdBefore(2 * YEAR) },
+    { kind: "plain", text: "a post about elections", createdAt: createdAgo(2 * YEAR) },
     {
       kind: "reply",
       text: "a reply to a deleted post",
-      createdAt: createdBefore(400 * DAY),
+      createdAt: createdAgo(400 * DAY),
       parent: deleted.uri,
     },
     {
       kind: "quote",
       text: "a quote of a post about football",
-      createdAt: createdBefore(YEAR + HOUR),
+      createdAt: createdAgo(YEAR + HOUR),
       quoted: football.uri,
     },
-    { kind: "plain", text: "a post about cooking", createdAt: createdBefore(YEAR - HOUR) },
+    { kind: "plain", text: "a post about cooking", createdAt: createdAgo(YEAR - HOUR) },
     {
       kind: "reply",
       text: "a reply about music",
-      createdAt: createdBefore(DAY),
+      createdAt: createdAgo(DAY),
       parent: football.uri,
     },
   ];
@@ -50,7 +42,7 @@ test("Daily run deletes only posts older than one year, with their reply and quo
   const [cooking, music] = added.slice(3);
   serveBluesky(bluesky);
 
-  await runDailyWorker(runStart);
+  await runDailyWorker(RUN_START);
 
   expect(bluesky.accountPosts().map((post) => post.uri)).toStrictEqual([cooking?.uri, music?.uri]);
   expect(bluesky.replySettings().map((settings) => settings.post)).toStrictEqual([

@@ -2,46 +2,51 @@
 // Cycle 3: delete likes in batches.
 import { expect, test } from "vitest";
 import { deleteRecords } from "../src/delete";
-import type { Collection, DatedRecordOf, LikeRecord, SubjectRecord } from "../src/domain-types";
+import type {
+  DatedRecordOf,
+  LikeRecord,
+  SubjectRecord,
+  SubjectRecordOf,
+} from "../src/domain-types";
 import { login } from "../src/session";
+import { APP_PASSWORD, BASE_URL, CID, DID } from "./constants";
 import { createFakeBluesky, type NewLike } from "./fake-bluesky";
+import { deletesOf } from "./network";
 
-const DID = "did:plc:fakeaccount000000000000";
-const BASE_URL = "https://fake-bluesky.test";
-const APP_PASSWORD = "fake-app-password";
-const CID = "bafyreie5737gdxlw5i64vzichcalba3z2v5n6icifvx5xytvske7mr3hpm";
-const DELETE = "com.atproto.repo.applyWrites#delete";
+const LIKE = "app.bsky.feed.like";
 
 const KINDS = [
-  { kind: "likes", collection: "app.bsky.feed.like", add: "addLikes", stored: "likes" },
+  { kind: "likes", collection: LIKE, add: "addLikes", stored: "likes" },
   { kind: "reposts", collection: "app.bsky.feed.repost", add: "addReposts", stored: "reposts" },
 ] as const;
 
-const rkeyOf = (record: { uri: string }) => record.uri.split("/").at(-1);
+const seed = (index: number): NewLike => ({
+  subject: `at://${DID}/app.bsky.feed.post/${index}`,
+  createdAt: new Date(Date.UTC(2020, 0, 1, 0, 0, index)).toISOString(),
+});
 
-const seeds = (count: number): NewLike[] =>
-  Array.from({ length: count }, (_, index) => ({
-    subject: `at://${DID}/app.bsky.feed.post/${index}`,
-    createdAt: new Date(Date.UTC(2020, 0, 1, 0, 0, index)).toISOString(),
-  }));
+const seeds = (count: number) => Array.from({ length: count }, (_, index) => seed(index));
 
-// The record as listRecords serves it, built from what the fake stored.
-const toSubjectRecord =
-  (collection: Collection) =>
-  (stored: { uri: string; subject: string; createdAt: string }): SubjectRecord =>
-    ({
-      uri: stored.uri,
-      cid: CID,
-      value: {
-        $type: collection,
-        subject: { uri: stored.subject, cid: CID },
-        createdAt: stored.createdAt,
-      },
-    }) as SubjectRecord;
+// The record as listRecords serves it.
+const subjectRecord = <C extends string>(
+  collection: C,
+  { uri, subject, createdAt }: { uri: string; subject: string; createdAt: string },
+): SubjectRecordOf<C> => ({
+  uri,
+  cid: CID,
+  value: { $type: collection, subject: { uri: subject, cid: CID }, createdAt },
+});
+
+const likeAt = (uri: string, index = 0): LikeRecord => subjectRecord(LIKE, { uri, ...seed(index) });
+
+const likes = (count: number) =>
+  seeds(count).map((_, index) => likeAt(`at://${DID}/${LIKE}/${index}`, index));
 
 async function deletionOf({ collection, add, stored }: (typeof KINDS)[number], count = 450) {
-  const bluesky = createFakeBluesky({ did: DID, baseUrl: BASE_URL, appPassword: APP_PASSWORD });
-  const records = bluesky[add](seeds(count)).map(toSubjectRecord(collection));
+  const bluesky = createFakeBluesky({ appPassword: APP_PASSWORD });
+  const records = bluesky[add](seeds(count)).map(
+    (stored) => subjectRecord(collection, stored) as SubjectRecord,
+  );
   const session = await login({
     baseUrl: BASE_URL,
     did: DID,
@@ -66,9 +71,7 @@ test.each(KINDS)("deletes 450 $kind in batches of 200, 200 and 50", async (kind)
   await expect(run()).resolves.toBeUndefined();
 
   expect(bluesky.receivedWrites().map((writes) => writes.length)).toStrictEqual([200, 200, 50]);
-  expect(bluesky.receivedWrites().flat()).toStrictEqual(
-    records.map((record) => ({ $type: DELETE, collection: kind.collection, rkey: rkeyOf(record) })),
-  );
+  expect(bluesky.receivedWrites().flat()).toStrictEqual(deletesOf(kind.collection, records));
   expect(reported.map((batch) => batch.length)).toStrictEqual([200, 200, 50]);
   expect(reported.flat()).toStrictEqual(records);
   expect(stored()).toStrictEqual([]);
@@ -84,9 +87,7 @@ test.each(KINDS)(
 
     expect(bluesky.receivedWrites().map((writes) => writes.length)).toStrictEqual([200, 200]);
     expect(bluesky.receivedWrites().flat()).toStrictEqual(
-      records
-        .slice(0, 400)
-        .map((record) => ({ $type: DELETE, collection: kind.collection, rkey: rkeyOf(record) })),
+      deletesOf(kind.collection, records.slice(0, 400)),
     );
     expect(reported).toStrictEqual([records.slice(0, 200)]);
     expect(stored().map(({ uri }) => uri)).toStrictEqual(records.slice(200).map(({ uri }) => uri));
@@ -94,19 +95,6 @@ test.each(KINDS)(
 );
 
 test("consumes or cancels every applyWrites response body, on success and on failure", async () => {
-  const likes: LikeRecord[] = Array.from({ length: 450 }, (_, index) => {
-    const uri = `at://${DID}/app.bsky.feed.like/${index}`;
-    const createdAt = new Date(Date.UTC(2020, 0, 1, 0, 0, index)).toISOString();
-    return {
-      uri,
-      cid: CID,
-      value: {
-        $type: "app.bsky.feed.like",
-        subject: { uri: `at://${DID}/app.bsky.feed.post/${index}`, cid: CID },
-        createdAt,
-      },
-    };
-  });
   const responses = [
     new Response(JSON.stringify({ results: [] }), { status: 200 }),
     new Response(JSON.stringify({ error: "InternalServerError" }), { status: 500 }),
@@ -115,7 +103,7 @@ test("consumes or cancels every applyWrites response body, on success and on fai
   const fetchHandler = async () => responses[calls++];
 
   await expect(
-    deleteRecords("app.bsky.feed.like", likes, {
+    deleteRecords(LIKE, likes(450), {
       did: DID,
       fetchHandler,
       onBatchDeleted: () => {},
@@ -145,15 +133,7 @@ test.each([
   },
 );
 
-const oneLike = (): LikeRecord => ({
-  uri: `at://${DID}/app.bsky.feed.like/one`,
-  cid: CID,
-  value: {
-    $type: "app.bsky.feed.like",
-    subject: { uri: `at://${DID}/app.bsky.feed.post/one`, cid: CID },
-    createdAt: "2020-01-01T00:00:00.000Z",
-  },
-});
+const oneLike = () => likeAt(`at://${DID}/${LIKE}/one`);
 
 test("sends applyWrites as JSON", async () => {
   const inits: (RequestInit | undefined)[] = [];
@@ -162,7 +142,7 @@ test("sends applyWrites as JSON", async () => {
     return Response.json({ results: [] });
   };
 
-  await deleteRecords("app.bsky.feed.like", [oneLike()], {
+  await deleteRecords(LIKE, [oneLike()], {
     did: DID,
     fetchHandler,
     onBatchDeleted: () => {},
@@ -178,7 +158,7 @@ test("accepts an applyWrites response without a body", async () => {
   const answerWithoutBody = async () => new Response(null, { status: 200 });
 
   await expect(
-    deleteRecords("app.bsky.feed.like", [oneLike()], {
+    deleteRecords(LIKE, [oneLike()], {
       did: DID,
       fetchHandler: answerWithoutBody,
       onBatchDeleted: (batch) => {
@@ -191,7 +171,7 @@ test("accepts an applyWrites response without a body", async () => {
 });
 
 test("deletes 450 posts in batches of 200, 200 and 50, all in the post collection", async () => {
-  const bluesky = createFakeBluesky({ did: DID, baseUrl: BASE_URL, appPassword: APP_PASSWORD });
+  const bluesky = createFakeBluesky({ appPassword: APP_PASSWORD });
   const posts = seeds(450).map(({ createdAt }, index) =>
     bluesky.addAccountPost({ kind: "plain", text: `post ${index}`, createdAt }),
   );
@@ -214,41 +194,17 @@ test("deletes 450 posts in batches of 200, 200 and 50, all in the post collectio
   });
 
   expect(bluesky.receivedWrites().map((writes) => writes.length)).toStrictEqual([200, 200, 50]);
-  expect(
-    bluesky
-      .receivedWrites()
-      .flat()
-      .map((write) => write.collection),
-  ).toStrictEqual(Array(450).fill("app.bsky.feed.post"));
-  expect(
-    bluesky
-      .receivedWrites()
-      .flat()
-      .map((write) => write.rkey),
-  ).toStrictEqual(records.map(rkeyOf));
+  expect(bluesky.receivedWrites().flat()).toStrictEqual(deletesOf("app.bsky.feed.post", records));
   expect(bluesky.accountPosts()).toStrictEqual([]);
-});
-
-const likeAt = (uri: string, index = 0): LikeRecord => ({
-  uri,
-  cid: CID,
-  value: {
-    $type: "app.bsky.feed.like",
-    subject: { uri: `at://${DID}/app.bsky.feed.post/${index}`, cid: CID },
-    createdAt: new Date(Date.UTC(2020, 0, 1, 0, 0, index)).toISOString(),
-  },
 });
 
 test.each([
   { reason: "a foreign DID", uri: "at://did:plc:otheraccount222222222222/app.bsky.feed.like/x" },
   { reason: "another collection", uri: `at://${DID}/app.bsky.feed.repost/x` },
   { reason: "no at:// prefix", uri: "https://example.com/x" },
-  { reason: "an empty rkey", uri: `at://${DID}/app.bsky.feed.like/` },
-  { reason: "extra path segments", uri: `at://${DID}/app.bsky.feed.like/a/b` },
+  { reason: "an empty rkey", uri: `at://${DID}/${LIKE}/` },
+  { reason: "extra path segments", uri: `at://${DID}/${LIKE}/a/b` },
 ])("refuses a record URI with $reason before sending any request", async ({ uri }) => {
-  const valid = Array.from({ length: 450 }, (_, index) =>
-    likeAt(`at://${DID}/app.bsky.feed.like/${index}`, index),
-  );
   const paths: string[] = [];
   const reported: LikeRecord[][] = [];
   const fetchHandler = async (path: string) => {
@@ -257,7 +213,7 @@ test.each([
   };
 
   await expect(
-    deleteRecords("app.bsky.feed.like", [...valid, likeAt(uri, 450)], {
+    deleteRecords(LIKE, [...likes(450), likeAt(uri, 450)], {
       did: DID,
       fetchHandler,
       onBatchDeleted: (batch) => {

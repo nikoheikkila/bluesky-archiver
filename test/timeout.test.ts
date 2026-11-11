@@ -5,10 +5,9 @@ import { expect, test } from "vitest";
 import type { Fetch } from "../src/bluesky";
 import { REQUEST_TIMEOUT_MS, withRequestTimeout } from "../src/timeout";
 import { createWorker } from "../src/worker";
-import { DAY } from "./constants";
-import { createFakeBluesky } from "./fake-bluesky";
+import { createdAgo, DAY, RUN_START } from "./constants";
+import { createEnvBluesky } from "./network";
 
-const RUN_START = Date.parse("2026-11-08T03:00:00Z");
 const URL_UNDER_TEST = "https://bsky.example/xrpc/com.atproto.repo.listRecords";
 
 const neverResolvesUntilAborted: Fetch = (_input, init) =>
@@ -46,32 +45,35 @@ test("keeps the request's method and body and adds an abort signal", async () =>
   expect(inits[0]?.signal).toBeInstanceOf(AbortSignal);
 });
 
-test("gives getRecord, createSession, listRecords and applyWrites requests an abort signal in a run", async () => {
-  const bluesky = createFakeBluesky({
-    did: env.BLUESKY_DID,
-    baseUrl: env.BLUESKY_SERVER_URL,
-    appPassword: "test-app-password",
-  });
+/** A default run that deletes one old like; returns every fetch call the Worker made. */
+async function runWithRecordedFetches() {
+  const bluesky = createEnvBluesky();
   const post = bluesky.addPost("a post");
-  bluesky.addLike({
-    subject: post.uri,
-    createdAt: new Date(RUN_START - 400 * DAY).toISOString(),
-  });
-  const inits: (RequestInit | undefined)[] = [];
+  bluesky.addLike({ subject: post.uri, createdAt: createdAgo(400 * DAY) });
+  const recorded: { path: string; signal: AbortSignal | null | undefined }[] = [];
   const worker = createWorker({
     fetch: (input, init) => {
-      inits.push(init);
+      recorded.push({ path: new URL(input).pathname, signal: init?.signal });
       return bluesky.fetch(input, init);
     },
     log: () => {},
   });
   const controller = createScheduledController({ scheduledTime: RUN_START, cron: "0 3 * * *" });
 
-  await worker.scheduled(controller, { ...env, BLUESKY_APP_PASSWORD: "test-app-password" });
+  await worker.scheduled(controller, env);
 
-  expect(inits).toHaveLength(bluesky.requests().length);
-  expect(inits.map((init) => init?.signal instanceof AbortSignal)).toStrictEqual(
-    Array(bluesky.requests().length).fill(true),
+  return { recorded, requestCount: bluesky.requests().length };
+}
+
+test("gives every request of a default run an abort signal that is still open after the run", async () => {
+  const { recorded, requestCount } = await runWithRecordedFetches();
+
+  expect(recorded).toHaveLength(requestCount);
+  expect(recorded.map(({ signal }) => signal instanceof AbortSignal)).toStrictEqual(
+    Array(requestCount).fill(true),
+  );
+  expect(recorded.map(({ signal }) => signal?.aborted)).toStrictEqual(
+    Array(requestCount).fill(false),
   );
 });
 
@@ -89,7 +91,7 @@ test("stops the run at a request that never finishes: the run rejects with a Tim
   const worker = createWorker({ fetch: neverFinishes, log: () => {}, requestTimeoutMs: 10 });
   const controller = createScheduledController({ scheduledTime: RUN_START, cron: "0 3 * * *" });
 
-  const run = worker.scheduled(controller, { ...env, BLUESKY_APP_PASSWORD: "test-app-password" });
+  const run = worker.scheduled(controller, env);
 
   await expect(run).rejects.toMatchObject({ name: "TimeoutError" });
   expect(inputs.map((input) => new URL(input).searchParams.get("collection"))).toStrictEqual([
@@ -99,39 +101,4 @@ test("stops the run at a request that never finishes: the run rejects with a Tim
 
 test("defaults the per-request timeout to 10 seconds", () => {
   expect(REQUEST_TIMEOUT_MS).toBe(10_000);
-});
-
-test("gives the session requests of a default run an abort signal that is still open after the run", async () => {
-  const bluesky = createFakeBluesky({
-    did: env.BLUESKY_DID,
-    baseUrl: env.BLUESKY_SERVER_URL,
-    appPassword: "test-app-password",
-  });
-  const post = bluesky.addPost("a post");
-  bluesky.addLike({
-    subject: post.uri,
-    createdAt: new Date(RUN_START - 400 * DAY).toISOString(),
-  });
-  const recorded: { path: string; signal: AbortSignal | null | undefined }[] = [];
-  const worker = createWorker({
-    fetch: (input, init) => {
-      recorded.push({ path: new URL(input).pathname, signal: init?.signal });
-      return bluesky.fetch(input, init);
-    },
-    log: () => {},
-  });
-  const controller = createScheduledController({ scheduledTime: RUN_START, cron: "0 3 * * *" });
-
-  await worker.scheduled(controller, { ...env, BLUESKY_APP_PASSWORD: "test-app-password" });
-
-  const signalsOf = (method: string) =>
-    recorded.filter(({ path }) => path.endsWith(method)).map(({ signal }) => signal);
-  const sessionSignals = [
-    ...signalsOf("com.atproto.server.createSession"),
-    ...signalsOf("com.atproto.repo.applyWrites"),
-  ];
-  expect(sessionSignals.map((signal) => signal instanceof AbortSignal)).toStrictEqual([true, true]);
-  expect(recorded.map(({ signal }) => signal?.aborted)).toStrictEqual(
-    Array(recorded.length).fill(false),
-  );
 });

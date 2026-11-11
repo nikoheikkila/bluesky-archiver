@@ -3,12 +3,22 @@ import { env } from "cloudflare:workers";
 import { setupNetwork } from "@msw/cloudflare";
 import { http } from "msw";
 import worker from "../src/index";
-import type { FakeBluesky } from "./fake-bluesky";
+import { rkeyOf } from "./constants";
+import { createFakeBluesky, type FakeBluesky } from "./fake-bluesky";
 
 // The suite's one network interceptor (enabled in test/setup/network.ts). It patches the runtime's
 // global fetch, so the real Worker entry point (src/index.ts) runs against the fake; a request no
 // handler matches fails the test instead of reaching the network.
 export const network = setupNetwork();
+
+/** A fake of the Bluesky account the Worker's own env names, accepting its app password. */
+export function createEnvBluesky(): FakeBluesky {
+  return createFakeBluesky({
+    did: env.BLUESKY_DID,
+    baseUrl: env.BLUESKY_SERVER_URL,
+    appPassword: env.BLUESKY_APP_PASSWORD,
+  });
+}
 
 /** Routes every request to the configured Bluesky server through the fake. */
 export function serveBluesky(bluesky: FakeBluesky): void {
@@ -36,6 +46,6 @@ export function deletesOf(collection: string, records: { uri: string }[]) {
   return records.map((record) => ({
     $type: "com.atproto.repo.applyWrites#delete",
     collection,
-    rkey: record.uri.split("/").at(-1),
+    rkey: rkeyOf(record.uri),
   }));
 }

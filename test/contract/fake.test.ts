@@ -2,6 +2,8 @@
 // Cycle 1: the fake serves likes page by page like the real server.
 import { expect, test } from "vitest";
 import type { Fetch } from "../../src/bluesky";
+import type { Collection } from "../../src/domain-types";
+import { APP_PASSWORD, BASE_URL, CID, DID } from "../constants";
 import {
   createFakeBluesky,
   type FakeBluesky,
@@ -16,12 +18,10 @@ import {
   walkMissingProfile,
   walkProfile,
 } from "./get-record.contract";
-import { walkListRecords } from "./list-records.contract";
+import { fetchPage, walkListRecords } from "./list-records.contract";
 import { FORBIDDEN_WRITES, walkRejectedWrite, walkWrites } from "./write.contract";
 
-const DID = "did:plc:fakeaccount000000000000";
-const BASE_URL = "https://fake-bluesky.test";
-const APP_PASSWORD = "fake-app-password";
+const CREATED_AT = "2025-01-01T00:00:00.000Z";
 
 function addThreeLikes(bluesky: FakeBluesky) {
   return bluesky.addLikes(
@@ -32,368 +32,11 @@ function addThreeLikes(bluesky: FakeBluesky) {
   );
 }
 
-test("fake Bluesky serves 3 likes at limit 2 as pages of 2, 1 and 0 like the real server", async () => {
-  const bluesky = createFakeBluesky({ did: DID, baseUrl: BASE_URL });
-  const likes = addThreeLikes(bluesky);
-
-  const pages = await walkListRecords({
-    baseUrl: BASE_URL,
-    did: DID,
-    limit: 2,
-    fetch: bluesky.fetch,
-  });
-
-  expect(pages.map((page) => page.length)).toStrictEqual([2, 1, 0]);
-  expect(
-    pages
-      .flat()
-      .map((record) => record.uri)
-      .sort(),
-  ).toStrictEqual(likes.map((like) => like.uri).sort());
-  expect(
-    bluesky.requests().map(({ method, url }) => [method, new URL(url).pathname]),
-  ).toStrictEqual(Array(3).fill(["GET", "/xrpc/com.atproto.repo.listRecords"]));
-});
-
-test("fake Bluesky logs in and deletes likes in batches of at most 200 like the real server", async () => {
-  const bluesky = createFakeBluesky({ did: DID, baseUrl: BASE_URL, appPassword: APP_PASSWORD });
-  const [first, second, third] = addThreeLikes(bluesky);
-
-  const { afterDelete } = await walkWrites({
-    baseUrl: BASE_URL,
-    did: DID,
-    appPassword: APP_PASSWORD,
-    likeUris: [first.uri, second.uri, third.uri],
-    fetch: bluesky.fetch,
-  });
-
-  expect(afterDelete).toStrictEqual([third.uri]);
-  expect(bluesky.likes().map((like) => like.uri)).toStrictEqual([third.uri]);
-});
-
-test.each(FORBIDDEN_WRITES)(
-  "fake Bluesky refuses applyWrites carrying $name and applies nothing",
-  async (forbidden) => {
-    const bluesky = createFakeBluesky({ did: DID, baseUrl: BASE_URL, appPassword: APP_PASSWORD });
-    const [first, second, third] = addThreeLikes(bluesky);
-
-    await walkRejectedWrite(
-      {
-        baseUrl: BASE_URL,
-        did: DID,
-        appPassword: APP_PASSWORD,
-        likeUris: [first.uri, second.uri, third.uri],
-        fetch: bluesky.fetch,
-      },
-      forbidden,
-    );
-
-    expect(bluesky.likes().map((like) => like.uri)).toStrictEqual([
-      first.uri,
-      second.uri,
-      third.uri,
-    ]);
-  },
-);
-
 function seedPost(bluesky: FakeBluesky) {
   return bluesky.addPost("quoted post").uri;
 }
 
-test("fake Bluesky serves 150 reposts as pages of 100, 50 and 0, each non-empty page with a cursor", async () => {
-  const bluesky = createFakeBluesky({ did: DID, baseUrl: BASE_URL });
-  const subject = seedPost(bluesky);
-  const reposts = bluesky.addReposts(
-    Array(150).fill({ subject, createdAt: "2025-01-01T00:00:00.000Z" }),
-  );
-
-  const pages = await walkListRecords({
-    baseUrl: BASE_URL,
-    did: DID,
-    limit: 100,
-    collection: "app.bsky.feed.repost",
-    fetch: bluesky.fetch,
-  });
-
-  expect(pages.map((page) => page.length)).toStrictEqual([100, 50, 0]);
-  expect(
-    pages
-      .flat()
-      .map((record) => record.uri)
-      .sort(),
-  ).toStrictEqual(reposts.map((repost) => repost.uri).sort());
-});
-
-test("fake Bluesky serves a repost that carries via with its via", async () => {
-  const bluesky = createFakeBluesky({ did: DID, baseUrl: BASE_URL });
-  const subject = seedPost(bluesky);
-  const via = seedPost(bluesky);
-  bluesky.addRepost({ subject, via, createdAt: "2025-01-01T00:00:00.000Z" });
-
-  const pages = await walkListRecords({
-    baseUrl: BASE_URL,
-    did: DID,
-    limit: 100,
-    collection: "app.bsky.feed.repost",
-    fetch: bluesky.fetch,
-  });
-
-  expect(pages.flat().map((record) => record.value.via?.uri)).toStrictEqual([via]);
-});
-
-test("fake Bluesky deletes 2 of 3 reposts with applyWrites and lists only the third", async () => {
-  const bluesky = createFakeBluesky({ did: DID, baseUrl: BASE_URL, appPassword: APP_PASSWORD });
-  const subject = seedPost(bluesky);
-  const [first, second, third] = bluesky.addReposts(
-    [1, 2, 3].map((day) => ({ subject, createdAt: `2025-01-0${day}T00:00:00.000Z` })),
-  );
-
-  const { afterDelete } = await walkWrites({
-    baseUrl: BASE_URL,
-    did: DID,
-    appPassword: APP_PASSWORD,
-    collection: "app.bsky.feed.repost",
-    likeUris: [first.uri, second.uri, third.uri],
-    fetch: bluesky.fetch,
-  });
-
-  expect(afterDelete).toStrictEqual([third.uri]);
-  expect(bluesky.reposts().map((repost) => repost.uri)).toStrictEqual([third.uri]);
-});
-
-test("fake Bluesky holds a quote post with an app.bsky.embed.record embed and reads it back", () => {
-  const bluesky = createFakeBluesky({ did: DID, baseUrl: BASE_URL });
-  const quoted = seedPost(bluesky);
-
-  const quote = bluesky.addAccountPost({
-    kind: "quote",
-    text: "",
-    quoted,
-    createdAt: "2025-01-01T00:00:00.000Z",
-  });
-
-  expect(bluesky.accountPosts()).toStrictEqual([quote]);
-  expect(quote).toMatchObject({ kind: "quote", quoted });
-});
-
-test.each([
-  {
-    kind: "a like",
-    collection: "app.bsky.feed.like",
-    add: (bluesky: FakeBluesky) =>
-      bluesky.addLike({ subject: "not-an-at-uri", createdAt: "2025-01-01T00:00:00.000Z" }),
-  },
-  {
-    kind: "a repost",
-    collection: "app.bsky.feed.repost",
-    add: (bluesky: FakeBluesky) =>
-      bluesky.addRepost({ subject: "not-an-at-uri", createdAt: "2025-01-01T00:00:00.000Z" }),
-  },
-] as const)(
-  "fake Bluesky refuses to serve $kind that breaks its record lexicon",
-  async ({ collection, add }) => {
-    const bluesky = createFakeBluesky({ did: DID, baseUrl: BASE_URL });
-    add(bluesky);
-
-    await expect(
-      walkListRecords({
-        baseUrl: BASE_URL,
-        did: DID,
-        limit: 100,
-        collection,
-        fetch: bluesky.fetch,
-      }),
-    ).rejects.toThrow();
-  },
-);
-
-async function listCollection(fetch: Fetch, collection: string) {
-  const url = new URL("/xrpc/com.atproto.repo.listRecords", BASE_URL);
-  url.searchParams.set("repo", DID);
-  url.searchParams.set("collection", collection);
-  url.searchParams.set("limit", "100");
-  const response = await fetch(url);
-  const body = (await response.json()) as {
-    records: { uri: string; value: { createdAt?: string } }[];
-  };
-
-  return {
-    status: response.status,
-    records: body.records.map((record) => ({ uri: record.uri, createdAt: record.value.createdAt })),
-  };
-}
-
-function listReposts(fetch: Fetch) {
-  return listCollection(fetch, "app.bsky.feed.repost");
-}
-
-test.each([
-  { problem: "has no createdAt", createdAt: undefined },
-  { problem: "has a createdAt that is not a date", createdAt: "not-a-date" },
-])("fake Bluesky serves a repost that $problem as stored", async ({ createdAt }) => {
-  const bluesky = createFakeBluesky({ did: DID, baseUrl: BASE_URL });
-  const subject = seedPost(bluesky);
-  const repost = bluesky.addRepost({ subject, createdAt } as unknown as NewRepost);
-
-  await expect(listReposts(bluesky.fetch)).resolves.toStrictEqual({
-    status: 200,
-    records: [{ uri: repost.uri, createdAt }],
-  });
-});
-
-test("fake Bluesky refuses a quote post that breaks its record lexicon", () => {
-  const bluesky = createFakeBluesky({ did: DID, baseUrl: BASE_URL });
-
-  expect(() =>
-    bluesky.addAccountPost({
-      kind: "quote",
-      text: "",
-      quoted: "not-an-at-uri",
-      createdAt: "2025-01-01T00:00:00.000Z",
-    }),
-  ).toThrow();
-});
-
-const PLAIN_POST: NewAccountPost = {
-  kind: "plain",
-  text: "a post",
-  createdAt: "2025-01-01T00:00:00.000Z",
-};
-
-test("fake Bluesky serves 150 posts of the account as pages of 100, 50 and 0, each non-empty page with a cursor", async () => {
-  const bluesky = createFakeBluesky({ did: DID, baseUrl: BASE_URL });
-  const posts = Array(150)
-    .fill(PLAIN_POST)
-    .map((post) => bluesky.addAccountPost(post));
-
-  const pages = await walkListRecords({
-    baseUrl: BASE_URL,
-    did: DID,
-    limit: 100,
-    collection: "app.bsky.feed.post",
-    fetch: bluesky.fetch,
-  });
-
-  expect(pages.map((page) => page.length)).toStrictEqual([100, 50, 0]);
-  expect(
-    pages
-      .flat()
-      .map((record) => record.uri)
-      .sort(),
-  ).toStrictEqual(posts.map((post) => post.uri).sort());
-});
-
-test("fake Bluesky deletes 2 of 3 posts with applyWrites and lists only the third", async () => {
-  const bluesky = createFakeBluesky({ did: DID, baseUrl: BASE_URL, appPassword: APP_PASSWORD });
-  const [first, second, third] = [1, 2, 3].map((day) =>
-    bluesky.addAccountPost({ ...PLAIN_POST, createdAt: `2025-01-0${day}T00:00:00.000Z` }),
-  );
-
-  const { afterDelete } = await walkWrites({
-    baseUrl: BASE_URL,
-    did: DID,
-    appPassword: APP_PASSWORD,
-    collection: "app.bsky.feed.post",
-    likeUris: [first.uri, second.uri, third.uri],
-    fetch: bluesky.fetch,
-  });
-
-  expect(afterDelete).toStrictEqual([third.uri]);
-  expect(bluesky.accountPosts().map((post) => post.uri)).toStrictEqual([third.uri]);
-});
-
-const PARENT = `at://${DID}/app.bsky.feed.post/parent`;
-
-const QUOTE_WITH_MEDIA: NewAccountPost = {
-  kind: "quote",
-  text: "",
-  quoted: PARENT,
-  withMedia: true,
-  createdAt: "2025-01-01T00:00:00.000Z",
-};
-
-test.each([
-  {
-    kind: "a reply",
-    post: { kind: "reply", text: "a reply", parent: PARENT, createdAt: PLAIN_POST.createdAt },
-    served: {
-      reply: {
-        root: { uri: PARENT, cid: expect.any(String) },
-        parent: { uri: PARENT, cid: expect.any(String) },
-      },
-    },
-  },
-  {
-    kind: "a quote post with an app.bsky.embed.recordWithMedia embed",
-    post: QUOTE_WITH_MEDIA,
-    served: { embed: expect.objectContaining({ $type: "app.bsky.embed.recordWithMedia" }) },
-  },
-] as { kind: string; post: NewAccountPost; served: Record<string, unknown> }[])(
-  "fake Bluesky serves $kind that validates against its record lexicon",
-  async ({ post, served }) => {
-    const bluesky = createFakeBluesky({ did: DID, baseUrl: BASE_URL });
-    const stored = bluesky.addAccountPost(post);
-
-    const pages = await walkListRecords({
-      baseUrl: BASE_URL,
-      did: DID,
-      limit: 100,
-      collection: "app.bsky.feed.post",
-      fetch: bluesky.fetch,
-    });
-
-    expect(pages.flat()).toEqual([
-      expect.objectContaining({
-        uri: stored.uri,
-        value: expect.objectContaining(served),
-      }),
-    ]);
-  },
-);
-
-async function addPostAndList(bluesky: FakeBluesky, createdAt: string | undefined) {
-  bluesky.addAccountPost({ ...PLAIN_POST, createdAt } as unknown as NewAccountPost);
-  return listCollection(bluesky.fetch, "app.bsky.feed.post");
-}
-
-test.each([
-  { problem: "has no createdAt", createdAt: undefined },
-  { problem: "has a createdAt that is not a date", createdAt: "not-a-date" },
-])("fake Bluesky serves a post that $problem as stored", async ({ createdAt }) => {
-  const bluesky = createFakeBluesky({ did: DID, baseUrl: BASE_URL });
-
-  await expect(addPostAndList(bluesky, createdAt)).resolves.toStrictEqual({
-    status: 200,
-    records: [{ uri: expect.stringContaining("/app.bsky.feed.post/"), createdAt }],
-  });
-});
-
-test("fake Bluesky keeps the posts that likes point at out of the account's post listing", async () => {
-  const bluesky = createFakeBluesky({ did: DID, baseUrl: BASE_URL });
-  bluesky.addPost("a post of another account");
-  const own = bluesky.addAccountPost(PLAIN_POST);
-
-  const pages = await walkListRecords({
-    baseUrl: BASE_URL,
-    did: DID,
-    limit: 100,
-    collection: "app.bsky.feed.post",
-    fetch: bluesky.fetch,
-  });
-
-  expect(pages.flat().map((record) => record.uri)).toStrictEqual([own.uri]);
-});
-
-test("fake Bluesky mints the posts that likes point at under a well-formed did:plc of another account", () => {
-  const bluesky = createFakeBluesky({ did: DID, baseUrl: BASE_URL });
-
-  const subject = bluesky.addPost("a post of another account");
-
-  expect(subject.uri.split("/")[2]).toBe("did:plc:otheraccount222222222222");
-  expect(subject.uri).toMatch(
-    /^at:\/\/did:plc:otheraccount222222222222\/app\.bsky\.feed\.post\/[A-Za-z0-9._~:-]+$/,
-  );
-});
+const PLAIN_POST: NewAccountPost = { kind: "plain", text: "a post", createdAt: CREATED_AT };
 
 const SETTINGS_KINDS = [
   {
@@ -422,63 +65,310 @@ function addSettingsOf(
   extra: Record<string, unknown> = {},
 ) {
   const post = bluesky.addAccountPost(PLAIN_POST);
-  return add(bluesky, {
-    post,
-    createdAt: "2025-01-01T00:00:00.000Z",
-    ...extra,
-  } as unknown as NewPostSettings);
+  return add(bluesky, { post, createdAt: CREATED_AT, ...extra } as unknown as NewPostSettings);
 }
 
-test.each(SETTINGS_KINDS)(
+// All five served collections. `seed` stores one record; a test that needs no createdAt or a
+// malformed one passes it explicitly, hence the cast.
+interface ServedCollection {
+  noun: string;
+  collection: Collection;
+  seed(bluesky: FakeBluesky, record?: { createdAt?: string }): { uri: string };
+  stored(bluesky: FakeBluesky): { uri: string }[];
+}
+
+const COLLECTIONS: ServedCollection[] = [
+  {
+    noun: "likes",
+    collection: "app.bsky.feed.like",
+    seed: (
+      bluesky: FakeBluesky,
+      { createdAt }: { createdAt?: string } = { createdAt: CREATED_AT },
+    ) => bluesky.addLike({ subject: seedPost(bluesky), createdAt } as NewRepost),
+    stored: (bluesky: FakeBluesky) => bluesky.likes(),
+  },
+  {
+    noun: "reposts",
+    collection: "app.bsky.feed.repost",
+    seed: (
+      bluesky: FakeBluesky,
+      { createdAt }: { createdAt?: string } = { createdAt: CREATED_AT },
+    ) => bluesky.addRepost({ subject: seedPost(bluesky), createdAt } as NewRepost),
+    stored: (bluesky: FakeBluesky) => bluesky.reposts(),
+  },
+  {
+    noun: "posts",
+    collection: "app.bsky.feed.post",
+    seed: (
+      bluesky: FakeBluesky,
+      { createdAt }: { createdAt?: string } = { createdAt: CREATED_AT },
+    ) => bluesky.addAccountPost({ ...PLAIN_POST, createdAt } as NewAccountPost),
+    stored: (bluesky: FakeBluesky) => bluesky.accountPosts(),
+  },
+  ...SETTINGS_KINDS.map((kind) => ({
+    noun: kind.noun,
+    collection: kind.collection,
+    seed: (
+      bluesky: FakeBluesky,
+      { createdAt }: { createdAt?: string } = { createdAt: CREATED_AT },
+    ) => addSettingsOf(bluesky, kind, { createdAt }),
+    stored: kind.stored,
+  })),
+];
+
+const uris = (records: { uri: string }[]) => records.map((record) => record.uri);
+
+test("fake Bluesky serves 3 likes at limit 2 as pages of 2, 1 and 0 like the real server", async () => {
+  const bluesky = createFakeBluesky();
+  const likes = addThreeLikes(bluesky);
+
+  const pages = await walkListRecords({
+    baseUrl: BASE_URL,
+    did: DID,
+    limit: 2,
+    fetch: bluesky.fetch,
+  });
+
+  expect(pages.map((page) => page.length)).toStrictEqual([2, 1, 0]);
+  expect(uris(pages.flat()).sort()).toStrictEqual(uris(likes).sort());
+  expect(
+    bluesky.requests().map(({ method, url }) => [method, new URL(url).pathname]),
+  ).toStrictEqual(Array(3).fill(["GET", "/xrpc/com.atproto.repo.listRecords"]));
+});
+
+test.each(COLLECTIONS)(
   "fake Bluesky serves 150 $noun as pages of 100, 50 and 0, each non-empty page with a cursor",
-  async (kind) => {
-    const bluesky = createFakeBluesky({ did: DID, baseUrl: BASE_URL });
-    const settings = Array.from({ length: 150 }, () => addSettingsOf(bluesky, kind));
+  async ({ collection, seed }) => {
+    const bluesky = createFakeBluesky();
+    const records = Array.from({ length: 150 }, () => seed(bluesky));
 
     const pages = await walkListRecords({
       baseUrl: BASE_URL,
       did: DID,
       limit: 100,
-      collection: kind.collection,
+      collection,
       fetch: bluesky.fetch,
     });
 
     expect(pages.map((page) => page.length)).toStrictEqual([100, 50, 0]);
-    expect(
-      pages
-        .flat()
-        .map((record) => record.uri)
-        .sort(),
-    ).toStrictEqual(settings.map((record) => record.uri).sort());
+    expect(uris(pages.flat()).sort()).toStrictEqual(uris(records).sort());
   },
 );
 
-test.each(SETTINGS_KINDS)(
-  "fake Bluesky deletes 2 of 3 $noun with applyWrites and lists only the third",
-  async (kind) => {
-    const bluesky = createFakeBluesky({ did: DID, baseUrl: BASE_URL, appPassword: APP_PASSWORD });
+test.each(COLLECTIONS)(
+  "fake Bluesky logs in and deletes 2 of 3 $noun with applyWrites and lists only the third",
+  async ({ collection, seed, stored }) => {
+    const bluesky = createFakeBluesky({ appPassword: APP_PASSWORD });
     const [first, second, third] = [1, 2, 3].map((day) =>
-      addSettingsOf(bluesky, kind, { createdAt: `2025-01-0${day}T00:00:00.000Z` }),
+      seed(bluesky, { createdAt: `2025-01-0${day}T00:00:00.000Z` }),
     );
 
     const { afterDelete } = await walkWrites({
       baseUrl: BASE_URL,
       did: DID,
       appPassword: APP_PASSWORD,
-      collection: kind.collection,
-      likeUris: [first.uri, second.uri, third.uri],
+      collection,
+      recordUris: [first.uri, second.uri, third.uri],
       fetch: bluesky.fetch,
     });
 
     expect(afterDelete).toStrictEqual([third.uri]);
-    expect(kind.stored(bluesky).map((record) => record.uri)).toStrictEqual([third.uri]);
+    expect(uris(stored(bluesky))).toStrictEqual([third.uri]);
   },
 );
+
+test.each(FORBIDDEN_WRITES)(
+  "fake Bluesky refuses applyWrites carrying $name and applies nothing",
+  async (forbidden) => {
+    const bluesky = createFakeBluesky({ appPassword: APP_PASSWORD });
+    const likes = addThreeLikes(bluesky);
+
+    await walkRejectedWrite(
+      {
+        baseUrl: BASE_URL,
+        did: DID,
+        appPassword: APP_PASSWORD,
+        recordUris: [likes[0].uri, likes[1].uri, likes[2].uri],
+        fetch: bluesky.fetch,
+      },
+      forbidden,
+    );
+
+    expect(uris(bluesky.likes())).toStrictEqual(uris(likes));
+  },
+);
+
+test("fake Bluesky serves a repost that carries via with its via", async () => {
+  const bluesky = createFakeBluesky();
+  const subject = seedPost(bluesky);
+  const via = seedPost(bluesky);
+  bluesky.addRepost({ subject, via, createdAt: CREATED_AT });
+
+  const pages = await walkListRecords({
+    baseUrl: BASE_URL,
+    did: DID,
+    limit: 100,
+    collection: "app.bsky.feed.repost",
+    fetch: bluesky.fetch,
+  });
+
+  expect(pages.flat().map((record) => record.value.via?.uri)).toStrictEqual([via]);
+});
+
+test("fake Bluesky holds a quote post with an app.bsky.embed.record embed and reads it back", () => {
+  const bluesky = createFakeBluesky();
+  const quoted = seedPost(bluesky);
+
+  const quote = bluesky.addAccountPost({ kind: "quote", text: "", quoted, createdAt: CREATED_AT });
+
+  expect(bluesky.accountPosts()).toStrictEqual([quote]);
+  expect(quote).toMatchObject({ kind: "quote", quoted });
+});
+
+test.each([
+  {
+    kind: "a like",
+    collection: "app.bsky.feed.like",
+    add: (bluesky: FakeBluesky) =>
+      bluesky.addLike({ subject: "not-an-at-uri", createdAt: CREATED_AT }),
+  },
+  {
+    kind: "a repost",
+    collection: "app.bsky.feed.repost",
+    add: (bluesky: FakeBluesky) =>
+      bluesky.addRepost({ subject: "not-an-at-uri", createdAt: CREATED_AT }),
+  },
+] as const)(
+  "fake Bluesky refuses to serve $kind that breaks its record lexicon",
+  async ({ collection, add }) => {
+    const bluesky = createFakeBluesky();
+    add(bluesky);
+
+    await expect(
+      walkListRecords({
+        baseUrl: BASE_URL,
+        did: DID,
+        limit: 100,
+        collection,
+        fetch: bluesky.fetch,
+      }),
+    ).rejects.toThrow();
+  },
+);
+
+test.each(
+  COLLECTIONS.flatMap((kind) => [
+    { ...kind, problem: "has no createdAt", createdAt: undefined },
+    { ...kind, problem: "has a createdAt that is not a date", createdAt: "not-a-date" },
+  ]),
+)("fake Bluesky serves $noun whose record $problem as stored", async (kind) => {
+  const bluesky = createFakeBluesky();
+  const record = kind.seed(bluesky, { createdAt: kind.createdAt });
+
+  const page = await fetchPage({
+    baseUrl: BASE_URL,
+    did: DID,
+    limit: 100,
+    collection: kind.collection,
+    fetch: bluesky.fetch,
+  });
+
+  expect(page.status).toBe(200);
+  expect(page.records.map(({ uri, value }) => [uri, value.createdAt])).toStrictEqual([
+    [record.uri, kind.createdAt],
+  ]);
+});
+
+test("fake Bluesky refuses a quote post that breaks its record lexicon", () => {
+  const bluesky = createFakeBluesky();
+
+  expect(() =>
+    bluesky.addAccountPost({
+      kind: "quote",
+      text: "",
+      quoted: "not-an-at-uri",
+      createdAt: CREATED_AT,
+    }),
+  ).toThrow();
+});
+
+const PARENT = `at://${DID}/app.bsky.feed.post/parent`;
+
+const QUOTE_WITH_MEDIA: NewAccountPost = {
+  kind: "quote",
+  text: "",
+  quoted: PARENT,
+  withMedia: true,
+  createdAt: CREATED_AT,
+};
+
+test.each([
+  {
+    kind: "a reply",
+    post: { kind: "reply", text: "a reply", parent: PARENT, createdAt: CREATED_AT },
+    served: {
+      reply: {
+        root: { uri: PARENT, cid: expect.any(String) },
+        parent: { uri: PARENT, cid: expect.any(String) },
+      },
+    },
+  },
+  {
+    kind: "a quote post with an app.bsky.embed.recordWithMedia embed",
+    post: QUOTE_WITH_MEDIA,
+    served: { embed: expect.objectContaining({ $type: "app.bsky.embed.recordWithMedia" }) },
+  },
+] as { kind: string; post: NewAccountPost; served: Record<string, unknown> }[])(
+  "fake Bluesky serves $kind that validates against its record lexicon",
+  async ({ post, served }) => {
+    const bluesky = createFakeBluesky();
+    const stored = bluesky.addAccountPost(post);
+
+    const pages = await walkListRecords({
+      baseUrl: BASE_URL,
+      did: DID,
+      limit: 100,
+      collection: "app.bsky.feed.post",
+      fetch: bluesky.fetch,
+    });
+
+    expect(pages.flat()).toEqual([
+      expect.objectContaining({ uri: stored.uri, value: expect.objectContaining(served) }),
+    ]);
+  },
+);
+
+test("fake Bluesky keeps the posts that likes point at out of the account's post listing", async () => {
+  const bluesky = createFakeBluesky();
+  bluesky.addPost("a post of another account");
+  const own = bluesky.addAccountPost(PLAIN_POST);
+
+  const pages = await walkListRecords({
+    baseUrl: BASE_URL,
+    did: DID,
+    limit: 100,
+    collection: "app.bsky.feed.post",
+    fetch: bluesky.fetch,
+  });
+
+  expect(uris(pages.flat())).toStrictEqual([own.uri]);
+});
+
+test("fake Bluesky mints the posts that likes point at under a well-formed did:plc of another account", () => {
+  const bluesky = createFakeBluesky();
+
+  const subject = bluesky.addPost("a post of another account");
+
+  expect(subject.uri.split("/")[2]).toBe("did:plc:otheraccount222222222222");
+  expect(subject.uri).toMatch(
+    /^at:\/\/did:plc:otheraccount222222222222\/app\.bsky\.feed\.post\/[A-Za-z0-9._~:-]+$/,
+  );
+});
 
 test.each(SETTINGS_KINDS)(
   "fake Bluesky serves $noun that carry $optionalField and validate against their record lexicon",
   async (kind) => {
-    const bluesky = createFakeBluesky({ did: DID, baseUrl: BASE_URL });
+    const bluesky = createFakeBluesky();
     const extra = { [kind.optionalField]: [`at://${DID}/app.bsky.feed.post/other`] };
     const stored = addSettingsOf(bluesky, kind, extra);
 
@@ -499,7 +389,7 @@ test.each(SETTINGS_KINDS)(
 test.each(SETTINGS_KINDS)(
   "fake Bluesky refuses $noun whose $optionalField break their record lexicon",
   (kind) => {
-    const bluesky = createFakeBluesky({ did: DID, baseUrl: BASE_URL });
+    const bluesky = createFakeBluesky();
 
     expect(() =>
       addSettingsOf(bluesky, kind, { [kind.optionalField]: ["not-an-at-uri"] }),
@@ -507,28 +397,12 @@ test.each(SETTINGS_KINDS)(
   },
 );
 
-test.each(
-  SETTINGS_KINDS.flatMap((kind) => [
-    { ...kind, problem: "has no createdAt", createdAt: undefined },
-    { ...kind, problem: "has a createdAt that is not a date", createdAt: "not-a-date" },
-  ]),
-)("fake Bluesky serves $noun that $problem as stored", async (kind) => {
-  const bluesky = createFakeBluesky({ did: DID, baseUrl: BASE_URL });
-  const add = () => addSettingsOf(bluesky, kind, { createdAt: kind.createdAt });
-
-  expect(add).not.toThrow();
-  await expect(listCollection(bluesky.fetch, kind.collection)).resolves.toStrictEqual({
-    status: 200,
-    records: [{ uri: expect.stringContaining(`/${kind.collection}/`), createdAt: kind.createdAt }],
-  });
-});
-
 test.each(SETTINGS_KINDS)(
   "fake Bluesky refuses a second $noun record for the same post like a duplicate record key",
   (kind) => {
-    const bluesky = createFakeBluesky({ did: DID, baseUrl: BASE_URL });
+    const bluesky = createFakeBluesky();
     const post = bluesky.addAccountPost(PLAIN_POST);
-    const settings = { post, createdAt: "2025-01-01T00:00:00.000Z" } as NewPostSettings;
+    const settings = { post, createdAt: CREATED_AT } as NewPostSettings;
     const first = kind.add(bluesky, settings);
 
     expect(() => kind.add(bluesky, settings)).toThrow();
@@ -537,7 +411,7 @@ test.each(SETTINGS_KINDS)(
 );
 
 test("fake Bluesky keeps reply settings and quote settings of one post together", () => {
-  const bluesky = createFakeBluesky({ did: DID, baseUrl: BASE_URL });
+  const bluesky = createFakeBluesky();
   const post = bluesky.addAccountPost(PLAIN_POST);
   const settings = { post, createdAt: "2025-01-01T00:00:00.000Z" } as NewPostSettings;
 
@@ -549,7 +423,7 @@ test("fake Bluesky keeps reply settings and quote settings of one post together"
 });
 
 test("fake Bluesky serves the profile with a pinned post through getRecord and validates it against its lexicon", async () => {
-  const bluesky = createFakeBluesky({ did: DID, baseUrl: BASE_URL });
+  const bluesky = createFakeBluesky();
   const post = bluesky.addAccountPost(PLAIN_POST);
   bluesky.pinPost(post);
 
@@ -563,7 +437,7 @@ test("fake Bluesky serves the profile with a pinned post through getRecord and v
 });
 
 test("fake Bluesky serves the profile of a pinned post of another account through getRecord", async () => {
-  const bluesky = createFakeBluesky({ did: DID, baseUrl: BASE_URL });
+  const bluesky = createFakeBluesky();
   const post = bluesky.addPost("a post of another account");
   bluesky.pinPost(post);
 
@@ -573,7 +447,7 @@ test("fake Bluesky serves the profile of a pinned post of another account throug
 });
 
 test("fake Bluesky serves a profile without a pinned post through getRecord without pinnedPost", async () => {
-  const bluesky = createFakeBluesky({ did: DID, baseUrl: BASE_URL });
+  const bluesky = createFakeBluesky();
   bluesky.addProfileWithoutPin();
 
   const served = await walkProfile({ baseUrl: BASE_URL, did: DID, fetch: bluesky.fetch });
@@ -582,7 +456,7 @@ test("fake Bluesky serves a profile without a pinned post through getRecord with
 });
 
 test("fake Bluesky answers getRecord with HTTP 400 RecordNotFound when no profile is stored", async () => {
-  const bluesky = createFakeBluesky({ did: DID, baseUrl: BASE_URL });
+  const bluesky = createFakeBluesky();
 
   await walkMissingProfile({ baseUrl: BASE_URL, did: DID, fetch: bluesky.fetch });
 });
@@ -593,7 +467,7 @@ test.each([
 ])(
   "fake Bluesky answers the profile read with HTTP $status for $problem when it is injected",
   async ({ status }) => {
-    const bluesky = createFakeBluesky({ did: DID, baseUrl: BASE_URL });
+    const bluesky = createFakeBluesky();
     bluesky.pinPost(bluesky.addAccountPost(PLAIN_POST));
     bluesky.failProfileRead({ status });
 
@@ -610,7 +484,7 @@ test.each([
   { problem: "another collection", collection: "app.bsky.feed.post", rkey: "self" },
   { problem: "another record key", collection: PROFILE_COLLECTION, rkey: "other" },
 ])("fake Bluesky refuses a getRecord for $problem by throwing", async ({ collection, rkey }) => {
-  const bluesky = createFakeBluesky({ did: DID, baseUrl: BASE_URL });
+  const bluesky = createFakeBluesky();
   bluesky.pinPost(bluesky.addAccountPost(PLAIN_POST));
 
   await expect(
@@ -622,7 +496,7 @@ test("the getRecord contract rejects a served profile that breaks its lexicon", 
   const broken: Fetch = async () =>
     Response.json({
       uri: profileUri(DID),
-      cid: "bafyreie5737gdxlw5i64vzichcalba3z2v5n6icifvx5xytvske7mr3hpm",
+      cid: CID,
       value: {
         $type: PROFILE_COLLECTION,
         pinnedPost: { uri: "not-an-at-uri", cid: "not-a-cid" },

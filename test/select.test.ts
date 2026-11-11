@@ -1,45 +1,36 @@
 // Feature: feature/delete-old-likes.feature
 // Cycle 4: pick the likes older than one year.
 import { expect, test } from "vitest";
-import type { DatedRecord, LikeRecord, RepostRecord } from "../src/domain-types";
+import type { LikeRecord } from "../src/domain-types";
 import { selectOldRecords } from "../src/select";
-import { DAY, HOUR, YEAR } from "./constants";
+import { createdAgo, DAY, HOUR, RUN_START, YEAR } from "./constants";
+import { recordOf } from "./records";
 
-function likeCreatedAt(id: string, createdAt: string): LikeRecord {
-  const uri = `at://did:plc:fakeaccount000000000000/app.bsky.feed.like/${id}`;
-  const subject = {
-    uri: `at://did:plc:someoneelse0000000000000/app.bsky.feed.post/${id}`,
-    cid: `cid-${id}`,
-  };
-  return { uri, cid: `like-cid-${id}`, value: { $type: "app.bsky.feed.like", subject, createdAt } };
-}
+const like = (id: string, createdAt?: unknown) => recordOf("app.bsky.feed.like", id, createdAt);
 
 test("selects the likes older than one year, oldest first, and skips those without a valid creation time", () => {
-  const runStart = Date.parse("2026-11-08T03:00:00Z");
-  const ago = (ms: number) => new Date(runStart - ms).toISOString();
-  const twoYears = likeCreatedAt("a", ago(2 * YEAR));
-  const fourHundredDays = likeCreatedAt("b", ago(400 * DAY));
-  const justOverAYear = likeCreatedAt("c", ago(YEAR + HOUR));
-  const justUnderAYear = likeCreatedAt("d", ago(YEAR - HOUR));
-  const yesterday = likeCreatedAt("e", ago(DAY));
-  const withoutCreatedAt = likeCreatedAt("f", "") as unknown as { value: Record<string, unknown> };
-  delete withoutCreatedAt.value.createdAt;
-  const unparseable = likeCreatedAt("g", "not-a-date");
+  const twoYears = like("a", createdAgo(2 * YEAR));
+  const fourHundredDays = like("b", createdAgo(400 * DAY));
+  const justOverAYear = like("c", createdAgo(YEAR + HOUR));
+  const justUnderAYear = like("d", createdAgo(YEAR - HOUR));
+  const yesterday = like("e", createdAgo(DAY));
+  const withoutCreatedAt = like("f");
+  const unparseable = like("g", "not-a-date");
 
   const result = selectOldRecords(
     [
       yesterday,
       twoYears,
-      withoutCreatedAt as unknown as LikeRecord,
+      withoutCreatedAt,
       justOverAYear,
       unparseable,
       fourHundredDays,
       justUnderAYear,
     ],
-    runStart,
+    RUN_START,
   );
 
-  expect(result.old.map((like) => like.uri)).toStrictEqual([
+  expect(result.old.map((record) => record.uri)).toStrictEqual([
     twoYears.uri,
     fourHundredDays.uri,
     justOverAYear.uri,
@@ -48,54 +39,31 @@ test("selects the likes older than one year, oldest first, and skips those witho
 });
 
 test("does not select a like created exactly one year before the run starts", () => {
-  const runStart = Date.parse("2026-11-08T03:00:00Z");
-  const exactlyAYear = likeCreatedAt("h", new Date(runStart - YEAR).toISOString());
-
-  const result = selectOldRecords([exactlyAYear], runStart);
+  const result = selectOldRecords([like("h", createdAgo(YEAR))], RUN_START);
 
   expect(result.old).toStrictEqual([]);
   expect(result.skipped).toBe(0);
 });
 
-function recordCreatedAt(
-  collection: "app.bsky.feed.like" | "app.bsky.feed.repost",
-  id: string,
-  createdAt: string,
-): LikeRecord | RepostRecord {
-  const subject = {
-    uri: `at://did:plc:someoneelse0000000000000/app.bsky.feed.post/${id}`,
-    cid: `cid-${id}`,
-  };
-  return {
-    uri: `at://did:plc:fakeaccount000000000000/${collection}/${id}`,
-    cid: `record-cid-${id}`,
-    value: { $type: collection, subject, createdAt },
-  } as LikeRecord | RepostRecord;
-}
-
 test.each([
   { kind: "likes", collection: "app.bsky.feed.like" },
   { kind: "reposts", collection: "app.bsky.feed.repost" },
+  { kind: "posts, whatever their kind", collection: "app.bsky.feed.post" },
 ] as const)("selects the $kind older than one year, oldest first", ({ collection }) => {
-  const runStart = Date.parse("2026-11-08T03:00:00Z");
-  const ago = (ms: number) => new Date(runStart - ms).toISOString();
-  const elections = recordCreatedAt(collection, "elections", ago(2 * YEAR));
-  const deletedPost = recordCreatedAt(collection, "deleted-post", ago(400 * DAY));
-  const football = recordCreatedAt(collection, "football", ago(YEAR + HOUR));
-  const cooking = recordCreatedAt(collection, "cooking", ago(YEAR - HOUR));
-  const music = recordCreatedAt(collection, "music", ago(DAY));
+  const elections = recordOf(collection, "elections", createdAgo(2 * YEAR));
+  const deletedPost = recordOf(collection, "deleted-post", createdAgo(400 * DAY));
+  const football = recordOf(collection, "football", createdAgo(YEAR + HOUR));
+  const cooking = recordOf(collection, "cooking", createdAgo(YEAR - HOUR));
+  const music = recordOf(collection, "music", createdAgo(DAY));
 
-  const result = selectOldRecords([music, football, elections, cooking, deletedPost], runStart);
+  const result = selectOldRecords([music, football, elections, cooking, deletedPost], RUN_START);
 
-  expect(result.old.map((record) => record.uri)).toStrictEqual([
-    elections.uri,
-    deletedPost.uri,
-    football.uri,
-  ]);
+  expect(result.old).toStrictEqual([elections, deletedPost, football]);
   expect(result.skipped).toBe(0);
 });
 
 test.each([
+  { kind: "missing", createdAt: undefined },
   { kind: "the number 0", createdAt: 0 },
   { kind: "the number 2020", createdAt: 2020 },
   { kind: "an array holding a date", createdAt: ["2020-01-01T00:00:00Z"] },
@@ -103,43 +71,17 @@ test.each([
   { kind: "null", createdAt: null },
   { kind: "an object", createdAt: {} },
 ])("skips and never selects a like whose createdAt is $kind, not a string", ({ createdAt }) => {
-  const runStart = Date.parse("2026-11-08T03:00:00Z");
-  const notAString = likeCreatedAt("i", createdAt as unknown as string);
-
-  const result = selectOldRecords([notAString], runStart);
+  const result = selectOldRecords([like("i", createdAt)], RUN_START);
 
   expect(result.old).toStrictEqual([]);
   expect(result.skipped).toBe(1);
 });
 
 test("skips and never selects a like that has no value", () => {
-  const runStart = Date.parse("2026-11-08T03:00:00Z");
-  const { uri, cid } = likeCreatedAt("j", "2020-01-01T00:00:00Z");
+  const { uri, cid } = like("j", "2020-01-01T00:00:00Z");
 
-  const result = selectOldRecords([{ uri, cid } as unknown as LikeRecord], runStart);
+  const result = selectOldRecords([{ uri, cid } as unknown as LikeRecord], RUN_START);
 
   expect(result.old).toStrictEqual([]);
   expect(result.skipped).toBe(1);
-});
-
-function postCreatedAt(id: string, createdAt: string): DatedRecord {
-  return {
-    uri: `at://did:plc:fakeaccount000000000000/app.bsky.feed.post/${id}`,
-    cid: `post-cid-${id}`,
-    value: { $type: "app.bsky.feed.post", createdAt },
-  };
-}
-
-test("selects the posts older than one year, oldest first, whatever their kind", () => {
-  const runStart = Date.parse("2026-11-08T03:00:00Z");
-  const ago = (ms: number) => new Date(runStart - ms).toISOString();
-  const elections = postCreatedAt("elections", ago(2 * YEAR));
-  const reply = postCreatedAt("reply", ago(400 * DAY));
-  const quote = postCreatedAt("quote", ago(YEAR + HOUR));
-  const post = postCreatedAt("post", ago(YEAR - HOUR));
-  const recentReply = postCreatedAt("recent-reply", ago(DAY));
-
-  const result = selectOldRecords([recentReply, quote, elections, post, reply], runStart);
-
-  expect(result.old).toStrictEqual([elections, reply, quote]);
 });

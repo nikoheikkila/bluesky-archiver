@@ -3,13 +3,7 @@
 // Holds for any account: it runs against the fake and, opt-in, the real server.
 import { expect } from "vitest";
 import type { Fetch } from "../../src/bluesky";
-
-export type ListedCollection =
-  | "app.bsky.feed.like"
-  | "app.bsky.feed.repost"
-  | "app.bsky.feed.post"
-  | "app.bsky.feed.threadgate"
-  | "app.bsky.feed.postgate";
+import type { Collection } from "../../src/domain-types";
 
 export interface ListRecordsTarget {
   baseUrl: string;
@@ -17,7 +11,7 @@ export interface ListRecordsTarget {
   limit: number;
   fetch: Fetch;
   /** Defaults to app.bsky.feed.like. */
-  collection?: ListedCollection;
+  collection?: Collection;
 }
 
 export interface ListedRecord {
@@ -37,7 +31,7 @@ export interface ListedRecord {
   };
 }
 
-interface ListRecordsPage {
+export interface ListRecordsPage {
   status: number;
   cursor?: string;
   records: ListedRecord[];
@@ -46,7 +40,7 @@ interface ListRecordsPage {
 const MAX_PAGES = 1000;
 
 // What every served record of a collection carries besides its uri and value.createdAt.
-const REQUIRED_VALUE_FIELDS: Record<ListedCollection, Record<string, unknown>> = {
+const REQUIRED_VALUE_FIELDS: Record<Collection, Record<string, unknown>> = {
   "app.bsky.feed.like": { subject: expect.objectContaining({ uri: expect.any(String) }) },
   "app.bsky.feed.repost": { subject: expect.objectContaining({ uri: expect.any(String) }) },
   "app.bsky.feed.post": { text: expect.any(String) },
@@ -54,7 +48,10 @@ const REQUIRED_VALUE_FIELDS: Record<ListedCollection, Record<string, unknown>> =
   "app.bsky.feed.postgate": { post: expect.any(String) },
 };
 
-async function fetchPage(target: ListRecordsTarget, cursor?: string): Promise<ListRecordsPage> {
+export async function fetchPage(
+  target: ListRecordsTarget,
+  cursor?: string,
+): Promise<ListRecordsPage> {
   const url = new URL("/xrpc/com.atproto.repo.listRecords", target.baseUrl);
   const params = {
     repo: target.did,

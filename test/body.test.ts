@@ -1,6 +1,7 @@
 // Workers best practice: a body read in full is capped before it is read.
 import { expect, test } from "vitest";
 import { discardBody, MAX_RESPONSE_BYTES, readJson } from "../src/body";
+import { endlessBody } from "./streams";
 
 const CAP = 10;
 const TOO_LARGE = `response body exceeds ${CAP} bytes`;
@@ -13,18 +14,6 @@ function chunkedBody(chunks: Uint8Array[], cancelled: unknown[] = []): ReadableS
     pull(controller) {
       const next = queue.shift();
       return next ? controller.enqueue(next) : controller.close();
-    },
-    cancel(reason) {
-      cancelled.push(reason);
-    },
-  });
-}
-
-/** A body that never ends, as a misbehaving server might send. */
-function endlessBody(cancelled: unknown[]): ReadableStream<Uint8Array> {
-  return new ReadableStream<Uint8Array>({
-    pull(controller) {
-      controller.enqueue(encode("12345"));
     },
     cancel(reason) {
       cancelled.push(reason);
@@ -74,7 +63,7 @@ test("rejects a streamed body one byte past the cap", async () => {
 test("stops reading and cancels a body that never ends", async () => {
   const cancelled: unknown[] = [];
 
-  await expect(readJson(new Response(endlessBody(cancelled)), CAP)).rejects.toStrictEqual(
+  await expect(readJson(new Response(endlessBody(cancelled, "12345")), CAP)).rejects.toStrictEqual(
     new Error(TOO_LARGE),
   );
   expect(cancelled).toHaveLength(1);
@@ -110,7 +99,7 @@ test.each([
 test("discardBody cancels an unread body", async () => {
   const cancelled: unknown[] = [];
 
-  await discardBody(new Response(endlessBody(cancelled)));
+  await discardBody(new Response(endlessBody(cancelled, "12345")));
 
   expect(cancelled).toHaveLength(1);
 });

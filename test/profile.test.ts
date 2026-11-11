@@ -1,15 +1,13 @@
 // Feature: feature/keep-pinned-post.feature (Test Case 8, readPinnedPost half)
 import { expect, test } from "vitest";
 import { readPinnedPost } from "../src/profile";
+import { BASE_URL, DID } from "./constants";
 import { createFakeBluesky } from "./fake-bluesky";
+import { endlessBody } from "./streams";
 
-const DID = "did:plc:fakeaccount000000000000";
-const BASE_URL = "https://fake-bluesky.test";
 const GET_RECORD_FAILED = "com.atproto.repo.getRecord failed with HTTP";
 
-function newBluesky() {
-  return createFakeBluesky({ did: DID, baseUrl: BASE_URL });
-}
+const newBluesky = () => createFakeBluesky();
 
 type Bluesky = ReturnType<typeof newBluesky>;
 
@@ -69,19 +67,18 @@ test.each([
   await expect(reading).rejects.toThrow(new Error(`${GET_RECORD_FAILED} ${status}`));
 });
 
-test("readPinnedPost rejects on an HTTP 500 whose body says RecordNotFound", async () => {
-  const recordNotFoundWith500 = async () =>
-    Response.json({ error: "RecordNotFound", message: "Could not locate record" }, { status: 500 });
-
-  const reading = readPinnedPost({ baseUrl: BASE_URL, did: DID, fetch: recordNotFoundWith500 });
-
-  await expect(reading).rejects.toThrow(new Error(`${GET_RECORD_FAILED} 500`));
-});
-
-test("readPinnedPost rejects on an HTTP 500 with no body", async () => {
-  const noBodyWith500 = async () => new Response(null, { status: 500 });
-
-  const reading = readPinnedPost({ baseUrl: BASE_URL, did: DID, fetch: noBodyWith500 });
+test.each([
+  {
+    name: "an HTTP 500 whose body says RecordNotFound",
+    respond: async () =>
+      Response.json(
+        { error: "RecordNotFound", message: "Could not locate record" },
+        { status: 500 },
+      ),
+  },
+  { name: "an HTTP 500 with no body", respond: async () => new Response(null, { status: 500 }) },
+])("readPinnedPost rejects on $name", async ({ respond }) => {
+  const reading = readPinnedPost({ baseUrl: BASE_URL, did: DID, fetch: respond });
 
   await expect(reading).rejects.toThrow(new Error(`${GET_RECORD_FAILED} 500`));
 });
@@ -106,21 +103,13 @@ test.each<{ name: string; respond: () => Promise<Response> }>([
 });
 
 test("readPinnedPost cancels the unread body of an HTTP 500 before rejecting", async () => {
-  let cancelled = false;
-  const body = new ReadableStream({
-    start(controller) {
-      controller.enqueue(new TextEncoder().encode("{}"));
-    },
-    cancel() {
-      cancelled = true;
-    },
-  });
-  const serverError = async () => new Response(body, { status: 500 });
+  const cancelled: unknown[] = [];
+  const serverError = async () => new Response(endlessBody(cancelled), { status: 500 });
 
   const reading = readPinnedPost({ baseUrl: BASE_URL, did: DID, fetch: serverError });
 
   await expect(reading).rejects.toThrow(new Error(`${GET_RECORD_FAILED} 500`));
-  expect(cancelled).toBe(true);
+  expect(cancelled).toHaveLength(1);
 });
 
 test("readPinnedPost sends one unauthenticated GET getRecord for the profile", async () => {

@@ -79,6 +79,12 @@
   `test/contract/fake.test.ts` in the default suite. Change the fake only together with its
   contract.
 - Tests fix the run start explicitly so they pass at any wall-clock time.
+- Shared test helpers, so no file redeclares them: `test/constants.ts` (`RUN_START`, `createdAgo`,
+  `DID`, `BASE_URL`, `APP_PASSWORD`, `WRONG_PASSWORD`, `CID`, `rkeyOf`, `HOUR`/`DAY`/`YEAR`),
+  `test/records.ts` (`recordOf`, a listed record of any collection for pure unit tests),
+  `test/streams.ts` (`endlessBody`, a body that records its cancel) and `test/network.ts`
+  (`createEnvBluesky()`, the fake on the Worker's own `env`). `createFakeBluesky()` defaults `did`
+  and `baseUrl` to `DID` and `BASE_URL`; without `appPassword` every login is refused.
 - The acceptance tests are integration tests, one per feature file:
   `test/delete-old-likes.integration.test.ts`, `test/delete-old-reposts.integration.test.ts`,
   `test/delete-old-posts.integration.test.ts` and `test/keep-pinned-post.integration.test.ts`.

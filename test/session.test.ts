@@ -1,19 +1,12 @@
 // Feature: feature/delete-old-likes.feature (Test Cases 10 and 12, login half)
 import { expect, test } from "vitest";
 import { login } from "../src/session";
+import { APP_PASSWORD, BASE_URL, DID, WRONG_PASSWORD } from "./constants";
 import { createFakeBluesky } from "./fake-bluesky";
-
-const DID = "did:plc:fakeaccount000000000000";
-const BASE_URL = "https://fake-bluesky.test";
-const APP_PASSWORD = "fake-app-password";
-const WRONG_PASSWORD = "wrong-app-password";
-
-function newBluesky() {
-  return createFakeBluesky({ did: DID, baseUrl: BASE_URL, appPassword: APP_PASSWORD });
-}
+import { endlessBody } from "./streams";
 
 test("login with the right password sends one createSession", async () => {
-  const bluesky = newBluesky();
+  const bluesky = createFakeBluesky({ appPassword: APP_PASSWORD });
 
   await login({ baseUrl: BASE_URL, did: DID, password: APP_PASSWORD, fetch: bluesky.fetch });
 
@@ -23,7 +16,7 @@ test("login with the right password sends one createSession", async () => {
 });
 
 test("the session's fetchHandler is authorised for applyWrites", async () => {
-  const bluesky = newBluesky();
+  const bluesky = createFakeBluesky({ appPassword: APP_PASSWORD });
   const session = await login({
     baseUrl: BASE_URL,
     did: DID,
@@ -41,7 +34,7 @@ test("the session's fetchHandler is authorised for applyWrites", async () => {
 });
 
 test("login with the wrong password rejects with HTTP 401 without leaking the password", async () => {
-  const bluesky = newBluesky();
+  const bluesky = createFakeBluesky({ appPassword: APP_PASSWORD });
 
   const failure = await login({
     baseUrl: BASE_URL,
@@ -96,22 +89,9 @@ test("sends createSession as JSON", async () => {
   ]);
 });
 
-/** An error body that stays open until cancelled; `cancelled` records each cancel. */
-function openErrorResponse(status: number, cancelled: unknown[]): Response {
-  const body = new ReadableStream({
-    pull(controller) {
-      controller.enqueue(new TextEncoder().encode("{}"));
-    },
-    cancel(reason) {
-      cancelled.push(reason);
-    },
-  });
-  return new Response(body, { status });
-}
-
 test("login cancels the unread body of a failed createSession before rejecting", async () => {
   const cancelled: unknown[] = [];
-  const unauthorised = async () => openErrorResponse(401, cancelled);
+  const unauthorised = async () => new Response(endlessBody(cancelled), { status: 401 });
 
   await expect(
     login({ baseUrl: BASE_URL, did: DID, password: APP_PASSWORD, fetch: unauthorised }),

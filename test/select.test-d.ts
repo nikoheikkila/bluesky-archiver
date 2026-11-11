@@ -7,14 +7,8 @@ test("selectOldRecords over likes returns a selection of like records", () => {
   expectTypeOf(selectOldRecords<LikeRecord>).returns.toEqualTypeOf<Selection<LikeRecord>>();
 });
 
-interface PostRecord {
-  uri: string;
-  cid: string;
-  value: { $type: "app.bsky.feed.post"; text: string; createdAt: string };
-}
-
 test("selectOldRecords is callable with post records and a run start", () => {
-  expectTypeOf(selectOldRecords).toBeCallableWith([] as PostRecord[], 0);
+  expectTypeOf(selectOldRecords).toBeCallableWith([] as DatedRecordOf<"app.bsky.feed.post">[], 0);
 });
 
 test("selectOldRecords over likes takes like records and a run start", () => {
