@@ -4,16 +4,26 @@ on:
   push:
     branches:
       - main
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.sha }}
+  cancel-in-progress: false
+
 jobs:
   test:
+    name: Acceptance Tests
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -45,14 +55,22 @@ jobs:
         run: task mutation:incremental
 
   deploy:
+    name: Deploy to Cloudflare
     needs: test
+    if: github.event_name == 'push' && github.ref_name == 'main'
     runs-on: ubuntu-latest
+    environment: prod
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
+        with:
+          no-cache: true
 
       - name: Setup Task
         uses: go-task/setup-task@v2
