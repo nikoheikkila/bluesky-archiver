@@ -1,5 +1,5 @@
 {
-  "name": "bluesky-archiver",
+  "name": "bluesky-cleaner",
   "private": true,
   "type": "module",
   "scripts": {

@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "bluesky-archiver",
+  "name": "bluesky-cleaner",
   "main": "src/index.ts",
   // The newest date the installed workerd accepts; a later date fails to start the runtime.
   "compatibility_date": "2026-11-04",

@@ -1,6 +1,6 @@
 ---
 name: add-record-kind
-description: Checklist for adding a new Bluesky record kind (for example posts) to the daily deletion run in bluesky-archiver, based on how reposts were added after likes. Use when specifying or implementing a slice that makes the Worker list or delete another collection, when extending the fake Bluesky server to a new collection, or when estimating the request budget of a new kind.
+description: Checklist for adding a new Bluesky record kind (for example posts) to the daily deletion run in bluesky-cleaner, based on how reposts were added after likes. Use when specifying or implementing a slice that makes the Worker list or delete another collection, when extending the fake Bluesky server to a new collection, or when estimating the request budget of a new kind.
 ---
 
 # Adding a record kind to the daily run

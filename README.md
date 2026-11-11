@@ -1,4 +1,4 @@
-# Bluesky Archiver
+# Bluesky Cleaner
 
 **A Cloudflare Worker that prunes old activity from my [Bluesky account](https://bsky.app/profile/nikoheikkila.fi).**
 
