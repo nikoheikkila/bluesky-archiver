@@ -2,13 +2,25 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "bluesky-archiver",
   "main": "src/index.ts",
-  "compatibility_date": "2026-08-22",
+  // The newest date the installed workerd accepts; a later date fails to start the runtime.
+  "compatibility_date": "2026-11-04",
+  "compatibility_flags": ["nodejs_compat"],
+  "upload_source_maps": true,
+  // A cron-only Worker has no fetch handler, so it needs no public URL.
+  "workers_dev": false,
+  "preview_urls": false,
   "observability": {
     "enabled": true,
+    // One run a day, so every log line and trace is kept.
     "logs": {
       "enabled": true,
+      "head_sampling_rate": 1,
       "invocation_logs": true,
       "persist": true
+    },
+    "traces": {
+      "enabled": true,
+      "head_sampling_rate": 1
     }
   },
   "triggers": {
@@ -17,5 +29,10 @@
   "vars": {
     "BLUESKY_DID": "did:plc:krt7mrzm5yv5wdcsr6cwpyiy",
     "BLUESKY_SERVER_URL": "https://shimeji.us-east.host.bsky.network"
+  },
+  // The Worker's only secret. Declaring it keeps the deploy credentials in .env out of Env, and
+  // wrangler deploy fails if the secret is not set on the Worker.
+  "secrets": {
+    "required": ["BLUESKY_APP_PASSWORD"]
   }
 }

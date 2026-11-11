@@ -1,3 +1,4 @@
+import { discardBody, readJson } from "./body";
 import type { Collection, LikeRecord, RecordIn } from "./domain-types";
 
 /** The web `fetch`, passed in so the caller decides where requests go. */
@@ -52,7 +53,8 @@ async function fetchPage<T>(
   }
   const response = await options.fetch(url);
   if (!response.ok) {
+    await discardBody(response);
     throw new Error(`${LIST_RECORDS} failed with HTTP ${response.status}`);
   }
-  return (await response.json()) as RecordsPage<T>;
+  return readJson<RecordsPage<T>>(response);
 }

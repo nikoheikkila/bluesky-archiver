@@ -2,7 +2,13 @@ import { type Fetch, LIKE_COLLECTION, listRecords } from "./bluesky";
 import { deleteRecords } from "./delete";
 import type { Collection, RecordIn } from "./domain-types";
 import { readPinnedPost, withoutPinnedPost } from "./profile";
-import { formatDeletionSummary, formatRecordLine, type RecordNoun } from "./report";
+import {
+  type DeletionSummary,
+  type RecordNoun,
+  type ReportEntry,
+  recordEntry,
+  summaryEntries,
+} from "./report";
 import { selectOldRecords } from "./select";
 import { login } from "./session";
 import { withRequestTimeout } from "./timeout";
@@ -15,9 +21,9 @@ const POSTGATE_COLLECTION = "app.bsky.feed.postgate" satisfies Collection;
 /** A report line's level; `src/index.ts` writes it with the `console` method of the same name. */
 export type LogLevel = "debug" | "info";
 
-export interface LogEntry {
+/** A report line at its level; `src/index.ts` writes it as one JSON line of message and fields. */
+export interface LogEntry extends ReportEntry {
   level: LogLevel;
-  message: string;
 }
 
 /**
@@ -124,14 +130,14 @@ class OldRecordsCleaner {
 
   private logDeleted<C extends Collection>(batch: RecordIn<C>[], noun: RecordNoun): number {
     for (const record of batch) {
-      this.deps.log({ level: "debug", message: formatRecordLine(record, noun) });
+      this.deps.log({ level: "debug", ...recordEntry(record, noun) });
     }
     return batch.length;
   }
 
-  private report(summary: Parameters<typeof formatDeletionSummary>[0], noun: RecordNoun): void {
-    for (const message of formatDeletionSummary(summary, noun)) {
-      this.deps.log({ level: "info", message });
+  private report(summary: DeletionSummary, noun: RecordNoun): void {
+    for (const entry of summaryEntries(summary, noun)) {
+      this.deps.log({ level: "info", ...entry });
     }
   }
 }

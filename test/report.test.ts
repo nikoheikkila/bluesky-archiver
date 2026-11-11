@@ -2,7 +2,13 @@
 // Cycle 5: format the report.
 import { expect, test } from "vitest";
 import type { DatedRecordOf, LikeRecord, RepostRecord } from "../src/domain-types";
-import { formatDeletionSummary, formatLikeLine, formatRecordLine } from "../src/report";
+import {
+  formatDeletionSummary,
+  formatLikeLine,
+  formatRecordLine,
+  recordEntry,
+  summaryEntries,
+} from "../src/report";
 
 function like(id: string, createdAt: string): LikeRecord {
   const uri = `at://did:plc:fakeaccount000000000000/app.bsky.feed.like/${id}`;
@@ -309,3 +315,33 @@ test.each(newKindSummaries)(
     expect(lines.filter((line) => line.endsWith("."))).toStrictEqual([]);
   },
 );
+
+// Workers best practice: structured logs carry the same facts as fields.
+test("gives a deleted record's line its URI and kind as fields", () => {
+  expect(recordEntry(firstRepost, "repost")).toStrictEqual({
+    message: firstRepostLine,
+    fields: { event: "record_deleted", kind: "repost", uri: firstRepost.uri },
+  });
+});
+
+test("gives the skipped line and the summary line their counts as fields", () => {
+  expect(summaryEntries({ found: 3, deleted: 2, skipped: 1 }, "post")).toStrictEqual([
+    {
+      message: "Skipped 1 post without a valid creation time",
+      fields: { event: "records_skipped", kind: "post", skipped: 1 },
+    },
+    {
+      message: "Deleted 2 of 3 posts older than one year",
+      fields: { event: "kind_summary", kind: "post", found: 3, deleted: 2, skipped: 1 },
+    },
+  ]);
+});
+
+test("gives a kind with nothing old one summary line with zero counts", () => {
+  expect(summaryEntries({ found: 0, deleted: 0, skipped: 0 }, "reply settings")).toStrictEqual([
+    {
+      message: "No reply settings are older than one year",
+      fields: { event: "kind_summary", kind: "reply settings", found: 0, deleted: 0, skipped: 0 },
+    },
+  ]);
+});

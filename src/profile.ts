@@ -1,4 +1,5 @@
 import type { Fetch } from "./bluesky";
+import { discardBody, readJson } from "./body";
 
 const GET_RECORD = "com.atproto.repo.getRecord";
 const PROFILE_COLLECTION = "app.bsky.actor.profile";
@@ -24,23 +25,20 @@ export async function readPinnedPost(options: ReadPinnedPostOptions): Promise<st
   url.searchParams.set("rkey", "self");
   const response = await options.fetch(url);
   if (response.ok) {
-    const body = (await response.json()) as ProfileBody;
+    const body = await readJson<ProfileBody>(response);
     // Stryker disable next-line OptionalChaining: getRecord requires value, so it is never undefined.
     return body.value?.pinnedPost?.uri;
   }
   if (response.status === 400 && (await isRecordNotFound(response))) {
     return undefined;
   }
-  // An unread body is cancelled so the Workers runtime releases the connection.
-  // Stryker disable next-line ConditionalExpression: after response.json() the body is closed, so cancel() is a no-op and the catch swallows any rejection, leaving the thrown error the same.
-  if (!response.bodyUsed) {
-    await response.body?.cancel().catch(() => undefined);
-  }
+  // A body readJson already read is left as it is; an unread one is cancelled.
+  await discardBody(response);
   throw new Error(`${GET_RECORD} failed with HTTP ${response.status}`);
 }
 
 async function isRecordNotFound(response: Response): Promise<boolean> {
-  const body = (await response.json().catch(treatUnparseableAsEmpty)) as ErrorBody | null;
+  const body = await readJson<ErrorBody | null>(response).catch(treatUnparseableAsEmpty);
   return body?.error === "RecordNotFound";
 }
 

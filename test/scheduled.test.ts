@@ -3,6 +3,7 @@
 import { createScheduledController } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { expect, test } from "vitest";
+import type { RecordNoun } from "../src/report";
 import { createWorker, type LogEntry } from "../src/worker";
 import { DAY, HOUR } from "./constants";
 import {
@@ -23,18 +24,36 @@ const NO_OLD_REPLY_SETTINGS = "No reply settings are older than one year";
 const NO_OLD_QUOTE_SETTINGS = "No quote settings are older than one year";
 
 const createdAgo = (ms: number) => new Date(RUN_START - ms).toISOString();
-const info = (message: string): LogEntry => ({ level: "info", message });
-const noOldPostsOrSettings = [
-  info(NO_OLD_POSTS),
-  info(NO_OLD_REPLY_SETTINGS),
-  info(NO_OLD_QUOTE_SETTINGS),
-];
-const deleting = (
-  noun: "like" | "repost" | "post" | "reply settings" | "quote settings",
-  record: { uri: string },
+const NO_OLD: Record<RecordNoun, string> = {
+  like: NO_OLD_LIKES,
+  repost: NO_OLD_REPOSTS,
+  post: NO_OLD_POSTS,
+  "reply settings": NO_OLD_REPLY_SETTINGS,
+  "quote settings": NO_OLD_QUOTE_SETTINGS,
+};
+const summary = (
+  message: string,
+  kind: RecordNoun,
+  { found, deleted, skipped }: { found: number; deleted: number; skipped: number },
 ): LogEntry => ({
+  level: "info",
+  message,
+  fields: { event: "kind_summary", kind, found, deleted, skipped },
+});
+const noOld = (kind: RecordNoun) =>
+  summary(NO_OLD[kind], kind, { found: 0, deleted: 0, skipped: 0 });
+const deletedAll = (message: string, kind: RecordNoun, count: number, skipped = 0) =>
+  summary(message, kind, { found: count, deleted: count, skipped });
+const skippedLine = (message: string, kind: RecordNoun, skipped: number): LogEntry => ({
+  level: "info",
+  message,
+  fields: { event: "records_skipped", kind, skipped },
+});
+const noOldPostsOrSettings = [noOld("post"), noOld("reply settings"), noOld("quote settings")];
+const deleting = (noun: RecordNoun, record: { uri: string }): LogEntry => ({
   level: "debug",
   message: `deleting ${noun} ${record.uri}`,
+  fields: { event: "record_deleted", kind: noun, uri: record.uri },
 });
 
 function newBluesky() {
@@ -139,11 +158,7 @@ test("reports no old likes and neither logs in nor deletes when every like is yo
 
   await expect(run()).resolves.toBeUndefined();
 
-  expect(entries).toStrictEqual([
-    info(NO_OLD_LIKES),
-    info(NO_OLD_REPOSTS),
-    ...noOldPostsOrSettings,
-  ]);
+  expect(entries).toStrictEqual([noOld("like"), noOld("repost"), ...noOldPostsOrSettings]);
   expect(requestsTo(bluesky, "com.atproto.server.createSession")).toHaveLength(0);
   expect(requestsTo(bluesky, "com.atproto.repo.applyWrites")).toHaveLength(0);
   expect(bluesky.likes()).toHaveLength(2);
@@ -155,11 +170,7 @@ test("reports nothing old after one listing request per collection when the acco
 
   await expect(run()).resolves.toBeUndefined();
 
-  expect(entries).toStrictEqual([
-    info(NO_OLD_LIKES),
-    info(NO_OLD_REPOSTS),
-    ...noOldPostsOrSettings,
-  ]);
+  expect(entries).toStrictEqual([noOld("like"), noOld("repost"), ...noOldPostsOrSettings]);
   expect(listedCollections(bluesky)).toStrictEqual([
     "app.bsky.feed.like",
     "app.bsky.feed.repost",
@@ -222,8 +233,8 @@ test("keeps the deleted likes logged after a failed batch and deletes the rest o
   await expect(secondRun.run()).resolves.toBeUndefined();
 
   expect(secondRun.entries.slice(-5)).toStrictEqual([
-    info("Deleted 250 of 250 likes older than one year"),
-    info(NO_OLD_REPOSTS),
+    deletedAll("Deleted 250 of 250 likes older than one year", "like", 250),
+    noOld("repost"),
     ...noOldPostsOrSettings,
   ]);
   expect(bluesky.likes()).toStrictEqual([]);
@@ -244,9 +255,9 @@ test("deletes only the datable old like and reports the undatable likes as skipp
 
   expect(entries).toStrictEqual([
     deleting("like", old),
-    info("Skipped 2 likes without a valid creation time"),
-    info("Deleted 1 of 1 like older than one year"),
-    info(NO_OLD_REPOSTS),
+    skippedLine("Skipped 2 likes without a valid creation time", "like", 2),
+    deletedAll("Deleted 1 of 1 like older than one year", "like", 1, 2),
+    noOld("repost"),
     ...noOldPostsOrSettings,
   ]);
   expect(bluesky.likes()).toStrictEqual([noDate, notADate]);
@@ -317,10 +328,10 @@ test("deletes old likes before listing reposts, then old reposts, with a single 
   expect(entries).toStrictEqual([
     deleting("like", olderLike),
     deleting("like", newerLike),
-    info("Deleted 2 of 2 likes older than one year"),
+    deletedAll("Deleted 2 of 2 likes older than one year", "like", 2),
     deleting("repost", olderRepost),
     deleting("repost", newerRepost),
-    info("Deleted 2 of 2 reposts older than one year"),
+    deletedAll("Deleted 2 of 2 reposts older than one year", "repost", 2),
     ...noOldPostsOrSettings,
   ]);
   expect(bluesky.likes()).toStrictEqual([]);
@@ -338,11 +349,7 @@ test("reports no old reposts and neither logs in nor deletes when every repost i
 
   await expect(run()).resolves.toBeUndefined();
 
-  expect(entries).toStrictEqual([
-    info(NO_OLD_LIKES),
-    info(NO_OLD_REPOSTS),
-    ...noOldPostsOrSettings,
-  ]);
+  expect(entries).toStrictEqual([noOld("like"), noOld("repost"), ...noOldPostsOrSettings]);
   expect(requestsTo(bluesky, "com.atproto.server.createSession")).toHaveLength(0);
   expect(requestsTo(bluesky, "com.atproto.repo.applyWrites")).toHaveLength(0);
   expect(bluesky.reposts()).toHaveLength(2);
@@ -369,9 +376,9 @@ test("logs in after listing reposts when only a repost is older than one year", 
   ]);
   expect(requestsTo(bluesky, "com.atproto.server.createSession")).toHaveLength(1);
   expect(entries).toStrictEqual([
-    info(NO_OLD_LIKES),
+    noOld("like"),
     deleting("repost", repost),
-    info("Deleted 1 of 1 repost older than one year"),
+    deletedAll("Deleted 1 of 1 repost older than one year", "repost", 1),
     ...noOldPostsOrSettings,
   ]);
   expect(bluesky.likes()).toStrictEqual([like]);
@@ -393,7 +400,7 @@ test("keeps the deleted likes and reposts logged after a failed repost batch and
 
   expect(firstRun.entries).toStrictEqual([
     deleting("like", like),
-    info("Deleted 1 of 1 like older than one year"),
+    deletedAll("Deleted 1 of 1 like older than one year", "like", 1),
     ...reposts
       .slice(250)
       .reverse()
@@ -409,12 +416,12 @@ test("keeps the deleted likes and reposts logged after a failed repost batch and
   await expect(secondRun.run()).resolves.toBeUndefined();
 
   expect(secondRun.entries).toStrictEqual([
-    info(NO_OLD_LIKES),
+    noOld("like"),
     ...reposts
       .slice(0, 250)
       .reverse()
       .map((repost) => deleting("repost", repost)),
-    info("Deleted 250 of 250 reposts older than one year"),
+    deletedAll("Deleted 250 of 250 reposts older than one year", "repost", 250),
     ...noOldPostsOrSettings,
   ]);
   expect(bluesky.reposts()).toStrictEqual([]);
@@ -497,13 +504,13 @@ test("deletes the old repost and the old quote post, each in its own write batch
   await expect(run()).resolves.toBeUndefined();
 
   expect(entries).toStrictEqual([
-    info(NO_OLD_LIKES),
+    noOld("like"),
     deleting("repost", repost),
-    info("Deleted 1 of 1 repost older than one year"),
+    deletedAll("Deleted 1 of 1 repost older than one year", "repost", 1),
     deleting("post", quote),
-    info("Deleted 1 of 1 post older than one year"),
-    info(NO_OLD_REPLY_SETTINGS),
-    info(NO_OLD_QUOTE_SETTINGS),
+    deletedAll("Deleted 1 of 1 post older than one year", "post", 1),
+    noOld("reply settings"),
+    noOld("quote settings"),
   ]);
   expect(bluesky.reposts()).toStrictEqual([]);
   expect(bluesky.accountPosts()).toStrictEqual([]);
@@ -574,7 +581,7 @@ test("fails after the likes total, with no reposts total or repost write, when l
 
   expect(entries).toStrictEqual([
     deleting("like", like),
-    info("Deleted 1 of 1 like older than one year"),
+    deletedAll("Deleted 1 of 1 like older than one year", "like", 1),
   ]);
   expect(listedCollections(bluesky)).toStrictEqual([
     "app.bsky.feed.like",
@@ -598,7 +605,7 @@ test("fails with no reposts total and keeps the repost when the login is rejecte
   const error = await run().catch((e: unknown) => e);
 
   expect(error).toBeInstanceOf(Error);
-  expect(entries).toStrictEqual([info(NO_OLD_LIKES)]);
+  expect(entries).toStrictEqual([noOld("like")]);
   expect(requestPhases(bluesky)).toStrictEqual([
     "repo.getRecord",
     "listRecords app.bsky.feed.like",
@@ -624,10 +631,10 @@ test("deletes only the datable old repost and reports the undatable reposts as s
   await expect(run()).resolves.toBeUndefined();
 
   expect(entries).toStrictEqual([
-    info(NO_OLD_LIKES),
+    noOld("like"),
     deleting("repost", old),
-    info("Skipped 2 reposts without a valid creation time"),
-    info("Deleted 1 of 1 repost older than one year"),
+    skippedLine("Skipped 2 reposts without a valid creation time", "repost", 2),
+    deletedAll("Deleted 1 of 1 repost older than one year", "repost", 1, 2),
     ...noOldPostsOrSettings,
   ]);
   expect(bluesky.reposts()).toStrictEqual([noDate, notADate]);
@@ -656,8 +663,8 @@ test("keeps the deleted likes and posts logged after a failed post batch and del
 
   expect(firstRun.entries).toStrictEqual([
     deleting("like", like),
-    info("Deleted 1 of 1 like older than one year"),
-    info(NO_OLD_REPOSTS),
+    deletedAll("Deleted 1 of 1 like older than one year", "like", 1),
+    noOld("repost"),
     ...posts
       .slice(250)
       .reverse()
@@ -674,15 +681,15 @@ test("keeps the deleted likes and posts logged after a failed post batch and del
   await expect(secondRun.run()).resolves.toBeUndefined();
 
   expect(secondRun.entries).toStrictEqual([
-    info(NO_OLD_LIKES),
-    info(NO_OLD_REPOSTS),
+    noOld("like"),
+    noOld("repost"),
     ...posts
       .slice(0, 250)
       .reverse()
       .map((post) => deleting("post", post)),
-    info("Deleted 250 of 250 posts older than one year"),
-    info(NO_OLD_REPLY_SETTINGS),
-    info(NO_OLD_QUOTE_SETTINGS),
+    deletedAll("Deleted 250 of 250 posts older than one year", "post", 250),
+    noOld("reply settings"),
+    noOld("quote settings"),
   ]);
   expect(bluesky.accountPosts()).toStrictEqual([]);
 });
@@ -700,7 +707,7 @@ test("fails after the posts report, with no reply settings total and no postgate
 
   await expect(run()).rejects.toThrow();
 
-  expect(entries).toStrictEqual([info(NO_OLD_LIKES), info(NO_OLD_REPOSTS), info(NO_OLD_POSTS)]);
+  expect(entries).toStrictEqual([noOld("like"), noOld("repost"), noOld("post")]);
   expect(listedCollections(bluesky)).toStrictEqual([
     "app.bsky.feed.like",
     "app.bsky.feed.repost",
@@ -729,13 +736,13 @@ test("judges reply and quote settings by their own age, not by the age or the ex
   await expect(run()).resolves.toBeUndefined();
 
   expect(entries).toStrictEqual([
-    info(NO_OLD_LIKES),
-    info(NO_OLD_REPOSTS),
+    noOld("like"),
+    noOld("repost"),
     deleting("post", post),
-    info("Deleted 1 of 1 post older than one year"),
-    info(NO_OLD_REPLY_SETTINGS),
+    deletedAll("Deleted 1 of 1 post older than one year", "post", 1),
+    noOld("reply settings"),
     deleting("quote settings", quoteSettings),
-    info("Deleted 1 of 1 quote settings older than one year"),
+    deletedAll("Deleted 1 of 1 quote settings older than one year", "quote settings", 1),
   ]);
   expect(bluesky.accountPosts()).toStrictEqual([]);
   expect(bluesky.replySettings()).toStrictEqual([replySettings]);
@@ -758,11 +765,7 @@ test("reports no old records of any kind and neither logs in nor deletes when ev
 
   await expect(run()).resolves.toBeUndefined();
 
-  expect(entries).toStrictEqual([
-    info(NO_OLD_LIKES),
-    info(NO_OLD_REPOSTS),
-    ...noOldPostsOrSettings,
-  ]);
+  expect(entries).toStrictEqual([noOld("like"), noOld("repost"), ...noOldPostsOrSettings]);
   expect(requestsTo(bluesky, "com.atproto.server.createSession")).toHaveLength(0);
   expect(requestsTo(bluesky, "com.atproto.repo.applyWrites")).toHaveLength(0);
 });
@@ -793,12 +796,12 @@ test("logs in after listing posts when only a post is older than one year", asyn
   ]);
   expect(requestsTo(bluesky, "com.atproto.server.createSession")).toHaveLength(1);
   expect(entries).toStrictEqual([
-    info(NO_OLD_LIKES),
-    info(NO_OLD_REPOSTS),
+    noOld("like"),
+    noOld("repost"),
     deleting("post", post),
-    info("Deleted 1 of 1 post older than one year"),
-    info(NO_OLD_REPLY_SETTINGS),
-    info(NO_OLD_QUOTE_SETTINGS),
+    deletedAll("Deleted 1 of 1 post older than one year", "post", 1),
+    noOld("reply settings"),
+    noOld("quote settings"),
   ]);
   expect(bluesky.likes()).toStrictEqual([like]);
   expect(bluesky.reposts()).toStrictEqual([repost]);
@@ -826,13 +829,13 @@ test("deletes only the datable old post and reports the undatable posts as skipp
   await expect(run()).resolves.toBeUndefined();
 
   expect(entries).toStrictEqual([
-    info(NO_OLD_LIKES),
-    info(NO_OLD_REPOSTS),
+    noOld("like"),
+    noOld("repost"),
     deleting("post", old),
-    info("Skipped 2 posts without a valid creation time"),
-    info("Deleted 1 of 1 post older than one year"),
-    info(NO_OLD_REPLY_SETTINGS),
-    info(NO_OLD_QUOTE_SETTINGS),
+    skippedLine("Skipped 2 posts without a valid creation time", "post", 2),
+    deletedAll("Deleted 1 of 1 post older than one year", "post", 1, 2),
+    noOld("reply settings"),
+    noOld("quote settings"),
   ]);
   expect(bluesky.accountPosts()).toStrictEqual([noDate, notADate]);
 });
@@ -854,11 +857,7 @@ test("keeps the only old post and neither logs in nor deletes when it is pinned"
 
   await expect(run()).resolves.toBeUndefined();
 
-  expect(entries).toStrictEqual([
-    info(NO_OLD_LIKES),
-    info(NO_OLD_REPOSTS),
-    ...noOldPostsOrSettings,
-  ]);
+  expect(entries).toStrictEqual([noOld("like"), noOld("repost"), ...noOldPostsOrSettings]);
   expect(requestPhases(bluesky)).toStrictEqual([
     "repo.getRecord",
     "listRecords app.bsky.feed.like",
@@ -890,12 +889,12 @@ test("deletes the old post when the pin has moved to a post younger than one yea
   await expect(run()).resolves.toBeUndefined();
 
   expect(entries).toStrictEqual([
-    info(NO_OLD_LIKES),
-    info(NO_OLD_REPOSTS),
+    noOld("like"),
+    noOld("repost"),
     deleting("post", old),
-    info("Deleted 1 of 1 post older than one year"),
-    info(NO_OLD_REPLY_SETTINGS),
-    info(NO_OLD_QUOTE_SETTINGS),
+    deletedAll("Deleted 1 of 1 post older than one year", "post", 1),
+    noOld("reply settings"),
+    noOld("quote settings"),
   ]);
   expect(bluesky.accountPosts()).toStrictEqual([pinned]);
 });
@@ -912,12 +911,12 @@ test("deletes the old post when the account has no profile record", async () => 
   await expect(run()).resolves.toBeUndefined();
 
   expect(entries).toStrictEqual([
-    info(NO_OLD_LIKES),
-    info(NO_OLD_REPOSTS),
+    noOld("like"),
+    noOld("repost"),
     deleting("post", old),
-    info("Deleted 1 of 1 post older than one year"),
-    info(NO_OLD_REPLY_SETTINGS),
-    info(NO_OLD_QUOTE_SETTINGS),
+    deletedAll("Deleted 1 of 1 post older than one year", "post", 1),
+    noOld("reply settings"),
+    noOld("quote settings"),
   ]);
   expect(bluesky.accountPosts()).toStrictEqual([]);
 });
@@ -935,12 +934,12 @@ test("deletes the old post when the profile has no pinned post", async () => {
   await expect(run()).resolves.toBeUndefined();
 
   expect(entries).toStrictEqual([
-    info(NO_OLD_LIKES),
-    info(NO_OLD_REPOSTS),
+    noOld("like"),
+    noOld("repost"),
     deleting("post", old),
-    info("Deleted 1 of 1 post older than one year"),
-    info(NO_OLD_REPLY_SETTINGS),
-    info(NO_OLD_QUOTE_SETTINGS),
+    deletedAll("Deleted 1 of 1 post older than one year", "post", 1),
+    noOld("reply settings"),
+    noOld("quote settings"),
   ]);
   expect(bluesky.accountPosts()).toStrictEqual([]);
 });
@@ -958,12 +957,12 @@ test("deletes the old own post when the pinned post belongs to another account",
   await expect(run()).resolves.toBeUndefined();
 
   expect(entries).toStrictEqual([
-    info(NO_OLD_LIKES),
-    info(NO_OLD_REPOSTS),
+    noOld("like"),
+    noOld("repost"),
     deleting("post", old),
-    info("Deleted 1 of 1 post older than one year"),
-    info(NO_OLD_REPLY_SETTINGS),
-    info(NO_OLD_QUOTE_SETTINGS),
+    deletedAll("Deleted 1 of 1 post older than one year", "post", 1),
+    noOld("reply settings"),
+    noOld("quote settings"),
   ]);
   expect(bluesky.accountPosts()).toStrictEqual([]);
 });
@@ -980,11 +979,7 @@ test("keeps the pinned post when the pinned CID differs from the post's CID", as
 
   await expect(run()).resolves.toBeUndefined();
 
-  expect(entries).toStrictEqual([
-    info(NO_OLD_LIKES),
-    info(NO_OLD_REPOSTS),
-    ...noOldPostsOrSettings,
-  ]);
+  expect(entries).toStrictEqual([noOld("like"), noOld("repost"), ...noOldPostsOrSettings]);
   expect(bluesky.accountPosts()).toStrictEqual([pinned]);
 });
 
@@ -1009,13 +1004,13 @@ test("deletes the old settings of the pinned post by their own age and keeps the
   await expect(run()).resolves.toBeUndefined();
 
   expect(entries).toStrictEqual([
-    info(NO_OLD_LIKES),
-    info(NO_OLD_REPOSTS),
-    info(NO_OLD_POSTS),
+    noOld("like"),
+    noOld("repost"),
+    noOld("post"),
     deleting("reply settings", replySettings),
-    info("Deleted 1 of 1 reply settings older than one year"),
+    deletedAll("Deleted 1 of 1 reply settings older than one year", "reply settings", 1),
     deleting("quote settings", quoteSettings),
-    info("Deleted 1 of 1 quote settings older than one year"),
+    deletedAll("Deleted 1 of 1 quote settings older than one year", "quote settings", 1),
   ]);
   expect(bluesky.accountPosts()).toStrictEqual([pinned]);
   expect(bluesky.replySettings()).toStrictEqual([]);
@@ -1049,12 +1044,12 @@ test("batches the old posts around the pinned post, oldest first, and never name
     bluesky.receivedWrites().flatMap((writes) => writes.map((write) => write.collection)),
   ).toStrictEqual(Array(449).fill("app.bsky.feed.post"));
   expect(entries).toStrictEqual([
-    info(NO_OLD_LIKES),
-    info(NO_OLD_REPOSTS),
+    noOld("like"),
+    noOld("repost"),
     ...deletable.map((post) => deleting("post", post)),
-    info("Deleted 449 of 449 posts older than one year"),
-    info(NO_OLD_REPLY_SETTINGS),
-    info(NO_OLD_QUOTE_SETTINGS),
+    deletedAll("Deleted 449 of 449 posts older than one year", "post", 449),
+    noOld("reply settings"),
+    noOld("quote settings"),
   ]);
   expect(bluesky.accountPosts()).toStrictEqual([pinned]);
 });

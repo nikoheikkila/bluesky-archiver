@@ -95,3 +95,26 @@ test("sends createSession as JSON", async () => {
     "application/json",
   ]);
 });
+
+/** An error body that stays open until cancelled; `cancelled` records each cancel. */
+function openErrorResponse(status: number, cancelled: unknown[]): Response {
+  const body = new ReadableStream({
+    pull(controller) {
+      controller.enqueue(new TextEncoder().encode("{}"));
+    },
+    cancel(reason) {
+      cancelled.push(reason);
+    },
+  });
+  return new Response(body, { status });
+}
+
+test("login cancels the unread body of a failed createSession before rejecting", async () => {
+  const cancelled: unknown[] = [];
+  const unauthorised = async () => openErrorResponse(401, cancelled);
+
+  await expect(
+    login({ baseUrl: BASE_URL, did: DID, password: APP_PASSWORD, fetch: unauthorised }),
+  ).rejects.toThrow("createSession failed with HTTP 401");
+  expect(cancelled).toHaveLength(1);
+});

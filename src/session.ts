@@ -1,4 +1,5 @@
 import type { Fetch } from "./bluesky";
+import { discardBody, readJson } from "./body";
 
 export interface LoginOptions {
   baseUrl: string;
@@ -21,9 +22,10 @@ function requestSession(options: LoginOptions): Promise<Response> {
 
 async function readAccessToken(response: Response): Promise<string> {
   if (!response.ok) {
+    await discardBody(response);
     throw new Error(`createSession failed with HTTP ${response.status}`);
   }
-  const body = (await response.json()) as { accessJwt?: unknown } | null;
+  const body = await readJson<{ accessJwt?: unknown } | null>(response);
   const accessJwt = body?.accessJwt;
   if (typeof accessJwt !== "string" || accessJwt === "") {
     throw new Error("createSession returned no access token");

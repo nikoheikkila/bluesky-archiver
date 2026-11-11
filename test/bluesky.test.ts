@@ -110,3 +110,26 @@ test("an empty page ends paging even when it carries a cursor", async () => {
   expect(records.map((record) => record.uri)).toStrictEqual(listed.map((record) => record.uri));
   expect(requested.map((url) => url.searchParams.get("cursor"))).toStrictEqual([null, "c1"]);
 });
+
+/** An error body that stays open until cancelled; `cancelled` records each cancel. */
+function openErrorResponse(status: number, cancelled: unknown[]): Response {
+  const body = new ReadableStream({
+    pull(controller) {
+      controller.enqueue(new TextEncoder().encode("{}"));
+    },
+    cancel(reason) {
+      cancelled.push(reason);
+    },
+  });
+  return new Response(body, { status });
+}
+
+test("cancels the unread body of a failed page before rejecting", async () => {
+  const cancelled: unknown[] = [];
+  const serverError = async () => openErrorResponse(500, cancelled);
+
+  await expect(listLikes({ baseUrl: BASE_URL, did: DID, fetch: serverError })).rejects.toThrow(
+    /com\.atproto\.repo\.listRecords.*500/,
+  );
+  expect(cancelled).toHaveLength(1);
+});

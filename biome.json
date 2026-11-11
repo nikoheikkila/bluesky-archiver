@@ -65,6 +65,9 @@
       },
       "performance": {
         "noDelete": "error"
+      },
+      "nursery": {
+        "noFloatingPromises": "error"
       }
     }
   },
