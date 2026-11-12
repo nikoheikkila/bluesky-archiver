@@ -11,11 +11,12 @@
   "preview_urls": false,
   "observability": {
     "enabled": true,
-    // One run a day, so every log line and trace is kept.
+    // One run a day, so every log line and trace is kept. Invocation logs ("scheduled OK",
+    // "fetch 200") only repeat what the report lines and traces already show.
     "logs": {
       "enabled": true,
       "head_sampling_rate": 1,
-      "invocation_logs": true,
+      "invocation_logs": false,
       "persist": true
     },
     "traces": {

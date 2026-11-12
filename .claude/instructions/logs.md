@@ -20,3 +20,6 @@ per-record lines. `wrangler tail` shows the same level per line (`.logs[].level`
 
 Observability in `wrangler.jsonc` keeps every log line and every trace (`head_sampling_rate: 1`
 for both, since the Worker runs once a day). Traces show each subrequest of a run in the dashboard.
+Invocation logs are off (`invocation_logs: false`): Cloudflare's per-invocation lines such as
+"bluesky-cleaner scheduled OK" and "bluesky-cleaner fetch 200" only repeated what the report lines
+and traces already show.
