@@ -4,9 +4,11 @@ The `task logs*` tasks run `scripts/tail.sh`, which wraps `wrangler tail` in a l
 when the session expires or drops; Ctrl-C (SIGINT/SIGTERM) stops it. The loop is a bash script
 because task's built-in shell does not support `trap`. `wrangler tail` is live-only (a short gap
 occurs during each reconnect), so leave one running before 03:00 UTC to catch the daily run. The
-token (per-Worker Editor and Metadata Read-Only roles) can tail but cannot query historical logs
-through the API; for history use Workers Logs in the dashboard, which keeps 3 days on the Free
-plan.
+token is worker-scoped with only the "Individual Workers: Editor" role on `bluesky-cleaner`: it
+can deploy, set secrets and tail this Worker, but sees no other Worker (the account is shared with
+the blog) and gets 403 on account-level APIs such as the audit log, members and R2. Never widen it
+to the legacy account-wide "Workers Scripts" permission. It cannot query historical logs through
+the API; for history use Workers Logs in the dashboard, which keeps 3 days on the Free plan.
 
 Every report line is one JSON object: the spec's `message` wording plus its facts as fields.
 A deleted record is `{ message, event: "record_deleted", kind, uri }`, a skipped line is
