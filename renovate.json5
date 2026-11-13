@@ -44,6 +44,21 @@
 	"osvVulnerabilityAlerts": true,
 
 	"packageRules": [
+		// config:best-practices extends security:minimumReleaseAgeNpm, a package rule that sets npm to 3 days.
+		// Package rules beat top-level options, so the 14 days above would not reach npm without this rule.
+		// Pins stay exempt (the preset nulls them): they carry no release timestamp and would never be raised.
+		{
+			"description": "Supply-chain cooldown for npm: restate 14 days over the 3-day preset rule",
+			"matchDatasources": [
+				"npm"
+			],
+			"matchUpdateTypes": [
+				"major",
+				"minor",
+				"patch"
+			],
+			"minimumReleaseAge": "14 days"
+		},
 		{
 			"description": "Automerge aged, non-major updates of npm devDependencies",
 			"matchManagers": [

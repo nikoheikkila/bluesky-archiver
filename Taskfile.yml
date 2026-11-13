@@ -48,7 +48,8 @@ tasks:
     desc: Lint Renovate configuration
     sources:
       - renovate.json5
-    cmd: bunx --package renovate renovate-config-validator --strict renovate.json5
+    # No file argument: with one, the validator checks the file as a global (self-hosted) config instead of a repo config.
+    cmd: bunx --package renovate renovate-config-validator --strict
 
   format:
     desc: Apply Biome fixes
