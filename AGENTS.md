@@ -44,7 +44,8 @@ CI (`.github/workflows/deploy.yml`) runs on every push to `main`: the `test` job
 `task typecheck`, `task test` and `task mutation:incremental` (with
 `reports/stryker-incremental.json` cached), then the `deploy` job deploys with
 `cloudflare/wrangler-action@v4` (reusing the locked `wrangler` devDependency) using the
-`CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` repository secrets.
+`CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` secrets of the `prod` environment, which only
+`main` can use. GitHub never holds the Bluesky app password.
 
 ### Version Control
 
