@@ -96,8 +96,9 @@
   `exports.default` from `cloudflare:workers` has no typed `scheduled`, so the tests import the
   default export instead. The tests assert the fake's state and `receivedWrites()`, not the log: the
   real log goes to `console`, and the exact lines are pinned at the `createWorker` level in
-  `test/scheduled.test.ts`. The fake's password is `env.BLUESKY_APP_PASSWORD`, which in tests is the
-  unresolved `op://` reference from `.env`.
+  `test/scheduled.test.ts`. The fake's password is `env.BLUESKY_APP_PASSWORD`, which in tests is
+  `APP_PASSWORD` from `test/constants.ts`: `vitest.config.mts` sets it on `process.env`, where
+  wrangler finds the required secret.
 - `test/setup/network.ts` (a Vitest `setupFiles` entry) enables MSW (`@msw/cloudflare`) for the
   whole suite with `onUnhandledFrame: "error"`, so a request that no handler matches fails the test
   instead of reaching the network. It resets handlers after each test.
@@ -111,7 +112,7 @@
   `wrangler.jsonc`; never edit it by hand, and Biome ignores it. `secrets.required` in
   `wrangler.jsonc` names `BLUESKY_APP_PASSWORD` as the only secret, so `wrangler types` no longer
   infers `Env` keys from `.env` (whose `CLOUDFLARE_*` deploy credentials are not Worker secrets),
-  local runs load only that key from `.env`, and `wrangler deploy` fails if the secret is not set. It declares the global
+  local runs load only that key (from `process.env` in tests), and `wrangler deploy` fails if the secret is not set. It declares the global
   `Env` (also `Cloudflare.Env`, which types `env` from `cloudflare:workers`) and the Workers runtime
   types (`ScheduledController`, `ExportedHandler`, `RequestInit`, …). Use these instead of
   hand-written equivalents. The generated `Env` makes `BLUESKY_APP_PASSWORD` a required string, so

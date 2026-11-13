@@ -60,12 +60,12 @@ task check      # lint, typecheck and tests, as CI runs them
 
 The account's identifier and server URL are Wrangler variables in `wrangler.jsonc` file.
 
-The app password is a
-Worker secret. Set it by piping the value from 1Password, because the interactive prompt does not
-work under `op run`:
+The app password is a Worker secret. `task secret` sets it by piping the value from 1Password
+(`op read`) into `wrangler secret put`, so the password is never in any process's environment.
+`.env` holds only the Cloudflare deploy credentials.
 
 ```bash
-op run --env-file=.env -- sh -c 'printf %s "$BLUESKY_APP_PASSWORD" | bunx wrangler secret put BLUESKY_APP_PASSWORD'
+task secret
 ```
 
 Every push to `main` runs the checks in GitHub Actions and then deploys the Worker. The

@@ -108,8 +108,8 @@ init), log: ({ level, message, fields }) => writers[level](JSON.stringify({ mess
   `RecordNotFound`, any other non-OK response, or a timeout) fails the run before any other
   request, so nothing is deleted. A missing profile, or a profile without `pinnedPost`, pins
   nothing.
-- It holds one secret, `BLUESKY_APP_PASSWORD`, a Worker secret whose `.env` entry is an `op://`
-  reference, never the value. The password must never appear in logs, errors, or the repository.
+- It holds one secret, `BLUESKY_APP_PASSWORD`, a Worker secret set by `task secret` from 1Password.
+  The password must never appear in logs, errors, the repository, or `.env`.
 - Any Cloudflare resource (KV, D1, R2, Durable Objects, and so on) is allowed when its usage stays
   within its free tier.
 - `compatibility_date` is pinned to the newest date the installed `workerd` accepts; a later date
@@ -125,10 +125,11 @@ init), log: ({ level, message, fields }) => writers[level](JSON.stringify({ mess
   imported from `src/` or bundled.
 - `.env` holds 1Password secret references (`op://…`), not secret values, so it is safe to track.
   This is a deliberate exception to the Workers best practice of gitignoring `.env`.
-  Inject the real values into a command with `op run --env-file=.env <command>`, for example
-  `op run --env-file=.env -- bunx wrangler deploy`. Set the secret with `op run`, piping the value
-  on stdin, because the interactive prompt fails under `op run`. The Vitest runner also loads `.env`
-  into the Worker's env in local tests, where the values stay unresolved references.
+  It holds only the two `CLOUDFLARE_*` deploy credentials. Inject them into a command with
+  `op run --env-file=.env <command>`, for example `op run --env-file=.env -- bunx wrangler deploy`.
+  Never add the Bluesky app password to `.env`: `op run` would hand it to every `wrangler deploy`
+  and `wrangler tail`, and to their dependency trees, which do not need it. `task secret` reads it
+  on its own with `op read -n` and pipes it on stdin (the interactive prompt fails under `op run`).
 
 ## Request Budget
 

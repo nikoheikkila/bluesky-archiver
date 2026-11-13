@@ -1,5 +1,10 @@
 import { cloudflareTest } from "@cloudflare/vitest-plugin";
 import { defineConfig } from "vitest/config";
+import { APP_PASSWORD } from "./test/constants";
+
+// The fake's password for the required secret, which wrangler reads from process.env. .env holds
+// only the deploy credentials, so the real app password never enters a wrangler or test process.
+process.env.BLUESKY_APP_PASSWORD = APP_PASSWORD;
 
 export default defineConfig({
   plugins: [

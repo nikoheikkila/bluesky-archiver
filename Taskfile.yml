@@ -62,6 +62,13 @@ tasks:
       vars: [command]
     cmd: op run --env-file=.env -- {{ .command }}
 
+  secret:
+    desc: Set the Worker's BLUESKY_APP_PASSWORD secret from 1Password (piped, never in the environment)
+    cmd: >-
+      op run --env-file=.env --
+      sh -c 'op read -n "op://Personal/Bluesky Cleaner/bluesky-app-password"
+      | bunx wrangler secret put BLUESKY_APP_PASSWORD'
+
   deploy:
     desc: Deploy the Worker with wrangler
     cmds:

@@ -34,6 +34,7 @@ task mutation                               # full Stryker run (slow; end-of-pha
 task mutation:incremental                   # Stryker reusing reports/stryker-incremental.json
 task mutation:diff [-- <base>]              # mutate only src/ files changed against the base branch (clean tree required)
 task dry-run                                # build the bundle without deploying
+task secret                                 # set the Worker's app password from 1Password (op read, piped)
 task logs                                   # stream the deployed Worker's logs, pretty-printed (needs the 1Password CLI)
 task logs:json                              # same as JSON lines, for agents and jq
 task logs:errors                            # only failed invocations
