@@ -1,12 +1,12 @@
 {
 	"$schema": "https://docs.renovatebot.com/renovate-schema.json",
 	"extends": [
+		// Pins GitHub Action digests and devDependencies, flags abandoned packages, migrates config.
 		"config:best-practices",
-		":automergeBranch",
-		":automergeMinor",
 		":automergeRequireAllStatusChecks",
 		":combinePatchMinorReleases",
 		":dependencyDashboard",
+		// Transitive dependencies move only when a reviewed, aged direct dependency moves.
 		":maintainLockFilesDisabled"
 	],
 	"enabledManagers": [
@@ -15,5 +15,76 @@
 	],
 	"schedule": [
 		"every weekend"
+	],
+	"timezone": "UTC",
+
+	// Supply-chain cooldown: compromised releases are usually caught and pulled within days.
+	// Never propose a release younger than 14 days, skip releases without a publish timestamp,
+	// and do not create the branch at all until the release has aged.
+	"minimumReleaseAge": "14 days",
+	"minimumReleaseAgeBehaviour": "timestamp-required",
+	"internalChecksFilter": "strict",
+
+	// Every update goes through a pull request, so the pull_request run of the Delivery Pipeline
+	// (lint, typecheck, tests, mutation tests) gates it. Pushes to main deploy, so nothing may
+	// land there without that run. GitHub's native auto-merge merges only after checks pass.
+	"automerge": false,
+	"automergeType": "pr",
+	"platformAutomerge": true,
+	"platformCommit": "enabled",
+	"rangeStrategy": "pin",
+
+	"vulnerabilityAlerts": {
+		"enabled": true,
+		"automerge": false,
+		"labels": [
+			"security"
+		]
+	},
+	"osvVulnerabilityAlerts": true,
+
+	"packageRules": [
+		{
+			"description": "Automerge aged, non-major updates of npm devDependencies",
+			"matchManagers": [
+				"bun"
+			],
+			"matchUpdateTypes": [
+				"minor",
+				"patch",
+				"pin",
+				"digest"
+			],
+			"automerge": true
+		},
+		{
+			"description": "Wrangler runs with the Cloudflare API token: always review by hand",
+			"matchPackageNames": [
+				"wrangler",
+				"@cloudflare/**"
+			],
+			"automerge": false,
+			"labels": [
+				"deploy-path"
+			]
+		},
+		{
+			"description": "Actions run inside CI and the deploy job: always review by hand",
+			"matchManagers": [
+				"github-actions"
+			],
+			"automerge": false,
+			"labels": [
+				"deploy-path"
+			]
+		},
+		{
+			"description": "Major updates only after approval on the Dependency Dashboard",
+			"matchUpdateTypes": [
+				"major"
+			],
+			"dependencyDashboardApproval": true,
+			"automerge": false
+		}
 	]
 }
