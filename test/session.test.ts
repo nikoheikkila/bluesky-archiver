@@ -89,6 +89,34 @@ test("sends createSession as JSON", async () => {
   ]);
 });
 
+test("refuses to follow a redirect, so the password is never resent to another host", async () => {
+  const inits: (RequestInit | undefined)[] = [];
+  const answerWithToken = async (_input: URL | string, init?: RequestInit) => {
+    inits.push(init);
+    return Response.json({ accessJwt: "fake-access-jwt", did: DID });
+  };
+
+  await login({ baseUrl: BASE_URL, did: DID, password: APP_PASSWORD, fetch: answerWithToken });
+
+  expect(inits.map((init) => init?.redirect)).toStrictEqual(["manual"]);
+});
+
+test("login rejects a redirected createSession without leaking the password", async () => {
+  const redirect = async () =>
+    new Response(null, { status: 307, headers: { Location: "https://elsewhere.test/" } });
+
+  const failure = await login({
+    baseUrl: BASE_URL,
+    did: DID,
+    password: APP_PASSWORD,
+    fetch: redirect,
+  }).catch((error: unknown) => error);
+
+  expect(failure, "login rejects a redirect").toBeInstanceOf(Error);
+  expect((failure as Error).message).toBe("createSession failed with HTTP 307");
+  expect((failure as Error).message).not.toContain(APP_PASSWORD);
+});
+
 test("login cancels the unread body of a failed createSession before rejecting", async () => {
   const cancelled: unknown[] = [];
   const unauthorised = async () => new Response(endlessBody(cancelled), { status: 401 });

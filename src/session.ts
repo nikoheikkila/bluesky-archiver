@@ -19,6 +19,9 @@ export async function login({
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ identifier: did, password }),
+    // Following a 307/308 would resend the body, password included, to wherever the redirect
+    // points. workerd has no "error" mode; "manual" returns the 3xx, which fails as non-OK below.
+    redirect: "manual",
   });
   if (!response.ok) {
     return failRequest(response, "createSession");
