@@ -1,0 +1,8 @@
+[install]
+# Save exact versions on `bun add`, matching Renovate's pinning (rangeStrategy: "pin").
+exact = true
+
+# Supply-chain cooldown: never resolve a package version published less than 14 days ago
+# (value in seconds). Matches minimumReleaseAge in renovate.json5, so Renovate's lock file
+# updates resolve the same versions it proposes.
+minimumReleaseAge = 1209600
